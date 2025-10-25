@@ -3,144 +3,101 @@ import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.function.Function;
 
 /**
- * 支持自定义编码的命令执行器
- * 解决 Windows 下中文乱码问题
+ * 支持直接输入字符串命令的执行器
+ * 不需要手动拆分命令，直接写完整的命令字符串
  */
-public class CommandExecutorWithEncoding {
+public class StringCommandExecutor {
     
     private final OsType osType;
-    private final List<String> commonPrefixCommands;
+    private Charset outputCharset;
     private File workingDirectory;
     private Map<String, String> environment;
     private long timeoutSeconds = 300;
-    private boolean isDocker = false;
-    private String dockerContainer;
+    private List<String> commonPrefixCommands;
     
-    // 新增：输出流编码设置
-    private Charset outputCharset;
-    
-    public CommandExecutorWithEncoding() {
+    public StringCommandExecutor() {
         this.osType = detectOsType();
-        this.commonPrefixCommands = new ArrayList<>();
         this.environment = new HashMap<>();
+        this.commonPrefixCommands = new ArrayList<>();
         
-        // 根据操作系统自动设置默认编码
+        // 根据操作系统设置默认编码
         if (osType == OsType.WINDOWS) {
-            // Windows 默认使用 GBK
             this.outputCharset = Charset.forName("GBK");
         } else {
-            // Unix/Linux 默认使用 UTF-8
             this.outputCharset = StandardCharsets.UTF_8;
         }
     }
     
-    /**
-     * 设置输出编码
-     * 常用编码:
-     * - GBK: 中文 Windows
-     * - UTF-8: Linux/Mac
-     * - GB2312: 简体中文
-     */
-    public CommandExecutorWithEncoding withOutputEncoding(String charsetName) {
-        this.outputCharset = Charset.forName(charsetName);
-        return this;
-    }
-    
-    /**
-     * 设置输出编码
-     */
-    public CommandExecutorWithEncoding withOutputEncoding(Charset charset) {
-        this.outputCharset = charset;
-        return this;
-    }
-    
-    /**
-     * 检测操作系统类型
-     */
     private OsType detectOsType() {
         String os = System.getProperty("os.name").toLowerCase();
         if (os.contains("win")) {
             return OsType.WINDOWS;
-        } else if (os.contains("nix") || os.contains("nux") || os.contains("mac")) {
-            return OsType.UNIX;
         }
         return OsType.UNIX;
     }
     
-    public CommandExecutorWithEncoding withPrefixCommands(String... commands) {
-        this.commonPrefixCommands.clear();
-        this.commonPrefixCommands.addAll(Arrays.asList(commands));
+    public StringCommandExecutor withOutputEncoding(String charsetName) {
+        this.outputCharset = Charset.forName(charsetName);
         return this;
     }
     
-    public CommandExecutorWithEncoding addPrefixCommand(String command) {
-        this.commonPrefixCommands.add(command);
-        return this;
-    }
-    
-    public CommandExecutorWithEncoding workingDirectory(String path) {
+    public StringCommandExecutor workingDirectory(String path) {
         this.workingDirectory = new File(path);
         return this;
     }
     
-    public CommandExecutorWithEncoding withEnvironment(String key, String value) {
-        this.environment.put(key, value);
-        return this;
-    }
-    
-    public CommandExecutorWithEncoding withEnvironment(Map<String, String> env) {
-        this.environment.putAll(env);
-        return this;
-    }
-    
-    public CommandExecutorWithEncoding timeout(long seconds) {
+    public StringCommandExecutor timeout(long seconds) {
         this.timeoutSeconds = seconds;
         return this;
     }
     
-    public CommandExecutorWithEncoding inDocker(String containerName) {
-        this.isDocker = true;
-        this.dockerContainer = containerName;
+    /**
+     * 添加公共前置命令（字符串形式）
+     */
+    public StringCommandExecutor addPrefixCommand(String command) {
+        this.commonPrefixCommands.add(command);
         return this;
     }
     
     /**
-     * 执行单个命令
+     * 执行单个命令 - 直接传入字符串
      */
-    public CommandResult execute(String... command) throws CommandExecutionException {
-        return execute(Arrays.asList(command));
-    }
-    
-    /**
-     * 执行单个命令 - 核心方法，使用指定编码读取输出
-     */
-    public CommandResult execute(List<String> command) throws CommandExecutionException {
-        List<String> fullCommand = buildFullCommand(command);
+    public CommandResult execute(String commandString) throws CommandExecutionException {
+        // 构建完整命令（包含前置命令）
+        String fullCommand = buildFullCommand(commandString);
         
         try {
-            ProcessBuilder pb = new ProcessBuilder(fullCommand);
+            System.out.println("【执行命令】" + fullCommand);
+            
+            ProcessBuilder pb;
+            if (osType == OsType.WINDOWS) {
+                // Windows: cmd.exe /c "命令"
+                pb = new ProcessBuilder("cmd.exe", "/c", fullCommand);
+            } else {
+                // Linux/Mac: sh -c "命令"
+                pb = new ProcessBuilder("sh", "-c", fullCommand);
+            }
             
             if (workingDirectory != null) {
                 pb.directory(workingDirectory);
+                System.out.println("【工作目录】" + workingDirectory.getAbsolutePath());
             }
             
             if (!environment.isEmpty()) {
                 pb.environment().putAll(environment);
             }
             
-            // 不合并错误流，分别读取
+            // 分别读取标准输出和错误输出
             pb.redirectErrorStream(false);
             
             Process process = pb.start();
             
-            // 使用指定编码读取输出
             StringBuilder output = new StringBuilder();
             StringBuilder error = new StringBuilder();
             
-            // 读取标准输出（使用指定编码）
+            // 读取标准输出
             CompletableFuture<Void> outputFuture = CompletableFuture.runAsync(() -> {
                 try (BufferedReader reader = new BufferedReader(
                         new InputStreamReader(process.getInputStream(), outputCharset))) {
@@ -153,7 +110,7 @@ public class CommandExecutorWithEncoding {
                 }
             });
             
-            // 读取错误输出（使用指定编码）
+            // 读取错误输出
             CompletableFuture<Void> errorFuture = CompletableFuture.runAsync(() -> {
                 try (BufferedReader reader = new BufferedReader(
                         new InputStreamReader(process.getErrorStream(), outputCharset))) {
@@ -171,7 +128,7 @@ public class CommandExecutorWithEncoding {
             
             if (!finished) {
                 process.destroyForcibly();
-                throw new CommandExecutionException("命令执行超时: " + String.join(" ", command));
+                throw new CommandExecutionException("命令执行超时");
             }
             
             // 等待输出读取完成
@@ -180,12 +137,13 @@ public class CommandExecutorWithEncoding {
             
             int exitCode = process.exitValue();
             
-            return new CommandResult(
-                exitCode,
-                output.toString().trim(),
-                error.toString().trim(),
-                exitCode == 0
-            );
+            String outputStr = output.toString();
+            String errorStr = error.toString();
+            
+            System.out.println("【命令完成】退出码=" + exitCode + ", 输出长度=" + outputStr.length() + 
+                             ", 错误长度=" + errorStr.length());
+            
+            return new CommandResult(exitCode, outputStr, errorStr, exitCode == 0);
             
         } catch (IOException | InterruptedException | ExecutionException | TimeoutException e) {
             throw new CommandExecutionException("命令执行失败: " + e.getMessage(), e);
@@ -193,77 +151,79 @@ public class CommandExecutorWithEncoding {
     }
     
     /**
-     * 执行命令链
+     * 执行命令链 - 使用字符串回调
      */
-    public List<CommandResult> executeChain(List<CommandCallback> callbacks) 
+    public List<CommandResult> executeChain(List<StringCommandCallback> callbacks) 
             throws CommandExecutionException {
         List<CommandResult> results = new ArrayList<>();
         CommandResult previousResult = null;
         
-        for (CommandCallback callback : callbacks) {
-            String[] command = callback.buildCommand(previousResult);
+        for (int i = 0; i < callbacks.size(); i++) {
+            System.out.println("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            System.out.println("【Callback " + (i + 1) + "】");
+            System.out.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
             
-            if (command == null || command.length == 0) {
+            StringCommandCallback callback = callbacks.get(i);
+            
+            // 打印上一个结果的信息
+            if (previousResult != null) {
+                System.out.println("【上一个命令结果】");
+                System.out.println("  成功: " + previousResult.isSuccess());
+                System.out.println("  退出码: " + previousResult.getExitCode());
+                System.out.println("  输出长度: " + previousResult.getOutput().length() + " 字符");
+                System.out.println("  错误长度: " + previousResult.getError().length() + " 字符");
+                
+                if (!previousResult.getOutput().isEmpty()) {
+                    // 只显示前200字符的预览
+                    String preview = previousResult.getOutput();
+                    if (preview.length() > 200) {
+                        preview = preview.substring(0, 200) + "...";
+                    }
+                    System.out.println("  输出预览: " + preview);
+                }
+            } else {
+                System.out.println("【上一个命令结果】null (这是第一个命令)");
+            }
+            
+            // 调用 callback 构造命令（返回字符串）
+            String commandString = callback.buildCommand(previousResult);
+            
+            if (commandString == null || commandString.isEmpty()) {
+                System.out.println("【结束】callback 返回 null/空字符串,命令链结束");
                 break;
             }
             
-            CommandResult result = execute(command);
+            // 执行命令
+            CommandResult result = execute(commandString);
             results.add(result);
             
+            // 检查是否需要停止
             if (!result.isSuccess() && callback.stopOnFailure()) {
+                System.out.println("【停止】命令失败且 stopOnFailure=true");
                 break;
             }
             
             previousResult = result;
         }
         
+        System.out.println("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        System.out.println("【命令链完成】共执行 " + results.size() + " 个命令");
+        System.out.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+        
         return results;
     }
     
     /**
-     * 构建完整命令
+     * 构建完整命令（包含前置命令）
      */
-    private List<String> buildFullCommand(List<String> command) {
-        List<String> fullCommand = new ArrayList<>();
-        
-        if (isDocker) {
-            fullCommand.add("docker");
-            fullCommand.add("exec");
-            fullCommand.add(dockerContainer);
-            fullCommand.add("sh");
-            fullCommand.add("-c");
-            String shellCommand = buildShellCommand(command);
-            fullCommand.add(shellCommand);
-        } else {
-            if (osType == OsType.WINDOWS) {
-                // Windows 使用 chcp 65001 设置 UTF-8 可能会有问题
-                // 直接使用 cmd.exe /c
-                fullCommand.add("cmd.exe");
-                fullCommand.add("/c");
-                String windowsCommand = buildWindowsCommand(command);
-                fullCommand.add(windowsCommand);
-            } else {
-                fullCommand.add("sh");
-                fullCommand.add("-c");
-                String shellCommand = buildShellCommand(command);
-                fullCommand.add(shellCommand);
-            }
+    private String buildFullCommand(String command) {
+        if (commonPrefixCommands.isEmpty()) {
+            return command;
         }
         
-        return fullCommand;
-    }
-    
-    private String buildShellCommand(List<String> command) {
-        List<String> allCommands = new ArrayList<>();
-        allCommands.addAll(commonPrefixCommands);
-        allCommands.addAll(command);
-        return String.join(" && ", allCommands);
-    }
-    
-    private String buildWindowsCommand(List<String> command) {
-        List<String> allCommands = new ArrayList<>();
-        allCommands.addAll(commonPrefixCommands);
-        allCommands.addAll(command);
+        // 用 && 连接所有命令
+        List<String> allCommands = new ArrayList<>(commonPrefixCommands);
+        allCommands.add(command);
         return String.join(" && ", allCommands);
     }
     
@@ -291,19 +251,27 @@ public class CommandExecutorWithEncoding {
         
         @Override
         public String toString() {
-            return "CommandResult{" +
-                    "exitCode=" + exitCode +
-                    ", success=" + success +
-                    ", output='" + output + '\'' +
-                    ", error='" + error + '\'' +
-                    '}';
+            return "CommandResult{exitCode=" + exitCode + ", success=" + success + 
+                   ", outputLength=" + output.length() + ", errorLength=" + error.length() + "}";
         }
     }
     
+    /**
+     * 字符串命令回调接口
+     * 返回字符串命令，而不是字符串数组
+     */
     @FunctionalInterface
-    public interface CommandCallback {
-        String[] buildCommand(CommandResult previousResult);
+    public interface StringCommandCallback {
+        /**
+         * 根据上一个命令的结果构造下一个命令（字符串形式）
+         * @param previousResult 上一个命令的结果
+         * @return 要执行的命令字符串，返回 null 表示结束链
+         */
+        String buildCommand(CommandResult previousResult);
         
+        /**
+         * 是否在失败时停止
+         */
         default boolean stopOnFailure() {
             return true;
         }
