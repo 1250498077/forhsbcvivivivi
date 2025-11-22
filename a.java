@@ -62,3 +62,14 @@ public String createStoryFromTemplate(String templateStoryId, String newSummary,
         throw new RuntimeException("Failed to create story: " + e.getMessage(), e);
     }
 }
+
+
+
+private boolean isReadOnlyField(String fieldKey) {
+    // 某些自定义字段是系统生成的，不能在创建时设置
+    List<String> readOnlyFields = [
+        "customfield_12077",  // 例如：自动计算的字段
+        "archiveddate"
+    ];
+    return readOnlyFields.contains(fieldKey);
+}
