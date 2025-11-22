@@ -1,289 +1,251 @@
-import java.io.*;
-import java.nio.charset.Charset;
-import java.nio.charset.StandardCharsets;
+import com.google.gson.Gson;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import java.util.*;
-import java.util.concurrent.*;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 
-/**
- * 支持直接输入字符串命令的执行器
- * 不需要手动拆分命令，直接写完整的命令字符串
- */
-public class StringCommandExecutor {
+public class JiraStoryCreator {
     
-    private final OsType osType;
-    private Charset outputCharset;
-    private File workingDirectory;
-    private Map<String, String> environment;
-    private long timeoutSeconds = 300;
-    private List<String> commonPrefixCommands;
+    private HttpClient httpClient;
+    private String jiraBaseUrl = "https://wpb-jira.systems.uk.hsbc";
+    private Gson gson = new Gson();
     
-    public StringCommandExecutor() {
-        this.osType = detectOsType();
-        this.environment = new HashMap<>();
-        this.commonPrefixCommands = new ArrayList<>();
-        
-        // 根据操作系统设置默认编码
-        if (osType == OsType.WINDOWS) {
-            this.outputCharset = Charset.forName("GBK");
-        } else {
-            this.outputCharset = StandardCharsets.UTF_8;
-        }
-    }
-    
-    private OsType detectOsType() {
-        String os = System.getProperty("os.name").toLowerCase();
-        if (os.contains("win")) {
-            return OsType.WINDOWS;
-        }
-        return OsType.UNIX;
-    }
-    
-    public StringCommandExecutor withOutputEncoding(String charsetName) {
-        this.outputCharset = Charset.forName(charsetName);
-        return this;
-    }
-    
-    public StringCommandExecutor workingDirectory(String path) {
-        this.workingDirectory = new File(path);
-        return this;
-    }
-    
-    public StringCommandExecutor timeout(long seconds) {
-        this.timeoutSeconds = seconds;
-        return this;
+    public JiraStoryCreator(HttpClient httpClient) {
+        this.httpClient = httpClient;
     }
     
     /**
-     * 添加公共前置命令（字符串形式）
+     * 获取项目创建 issue 时可用的自定义字段
      */
-    public StringCommandExecutor addPrefixCommand(String command) {
-        this.commonPrefixCommands.add(command);
-        return this;
-    }
-    
-    /**
-     * 执行单个命令 - 直接传入字符串
-     */
-    public CommandResult execute(String commandString) throws CommandExecutionException {
-        // 构建完整命令（包含前置命令）
-        String fullCommand = buildFullCommand(commandString);
-        
+    public Set<String> getCreatableCustomFields(String projectKey, String issueType) {
         try {
-            System.out.println("【执行命令】" + fullCommand);
+            String encodedIssueType = URLEncoder.encode(issueType, StandardCharsets.UTF_8);
+            String metaUrl = String.format("%s/rest/api/2/issue/createmeta?projectKeys=%s&issuetypeNames=%s&expand=projects.issuetypes.fields",
+                    jiraBaseUrl, projectKey, encodedIssueType);
             
-            ProcessBuilder pb;
-            if (osType == OsType.WINDOWS) {
-                // Windows: cmd.exe /c "命令"
-                pb = new ProcessBuilder("cmd.exe", "/c", fullCommand);
-            } else {
-                // Linux/Mac: sh -c "命令"
-                pb = new ProcessBuilder("sh", "-c", fullCommand);
+            HttpResponse response = httpClient.httpRequest(metaUrl, "GET");
+            JsonObject meta = JsonParser.parseString(response.getText()).getAsJsonObject();
+            
+            // 导航到字段定义
+            JsonArray projects = meta.getAsJsonArray("projects");
+            if (projects.size() == 0) {
+                return new HashSet<>();
             }
             
-            if (workingDirectory != null) {
-                pb.directory(workingDirectory);
-                System.out.println("【工作目录】" + workingDirectory.getAbsolutePath());
+            JsonObject project = projects.get(0).getAsJsonObject();
+            JsonArray issuetypes = project.getAsJsonArray("issuetypes");
+            if (issuetypes.size() == 0) {
+                return new HashSet<>();
             }
             
-            if (!environment.isEmpty()) {
-                pb.environment().putAll(environment);
-            }
+            JsonObject fields = issuetypes.get(0).getAsJsonObject().getAsJsonObject("fields");
             
-            // 分别读取标准输出和错误输出
-            pb.redirectErrorStream(false);
-            
-            Process process = pb.start();
-            
-            StringBuilder output = new StringBuilder();
-            StringBuilder error = new StringBuilder();
-            
-            // 读取标准输出
-            CompletableFuture<Void> outputFuture = CompletableFuture.runAsync(() -> {
-                try (BufferedReader reader = new BufferedReader(
-                        new InputStreamReader(process.getInputStream(), outputCharset))) {
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        output.append(line).append("\n");
+            // 提取所有 customfield 字段
+            Set<String> creatableFields = new HashSet<>();
+            for (String fieldKey : fields.keySet()) {
+                if (fieldKey.startsWith("customfield_")) {
+                    JsonObject fieldMeta = fields.getAsJsonObject(fieldKey);
+                    // 检查字段是否必需或允许设置
+                    if (!fieldMeta.has("operations") || 
+                        fieldMeta.getAsJsonArray("operations").size() > 0) {
+                        creatableFields.add(fieldKey);
                     }
-                } catch (IOException e) {
-                    throw new UncheckedIOException(e);
                 }
-            });
-            
-            // 读取错误输出
-            CompletableFuture<Void> errorFuture = CompletableFuture.runAsync(() -> {
-                try (BufferedReader reader = new BufferedReader(
-                        new InputStreamReader(process.getErrorStream(), outputCharset))) {
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        error.append(line).append("\n");
-                    }
-                } catch (IOException e) {
-                    throw new UncheckedIOException(e);
-                }
-            });
-            
-            // 等待进程完成
-            boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
-            
-            if (!finished) {
-                process.destroyForcibly();
-                throw new CommandExecutionException("命令执行超时");
             }
             
-            // 等待输出读取完成
-            outputFuture.get(5, TimeUnit.SECONDS);
-            errorFuture.get(5, TimeUnit.SECONDS);
+            return creatableFields;
             
-            int exitCode = process.exitValue();
-            
-            String outputStr = output.toString();
-            String errorStr = error.toString();
-            
-            System.out.println("【命令完成】退出码=" + exitCode + ", 输出长度=" + outputStr.length() + 
-                             ", 错误长度=" + errorStr.length());
-            
-            return new CommandResult(exitCode, outputStr, errorStr, exitCode == 0);
-            
-        } catch (IOException | InterruptedException | ExecutionException | TimeoutException e) {
-            throw new CommandExecutionException("命令执行失败: " + e.getMessage(), e);
+        } catch (Exception e) {
+            System.err.println("Error getting creatable fields: " + e.getMessage());
+            return new HashSet<>();
         }
     }
     
     /**
-     * 执行命令链 - 使用字符串回调
+     * 从模板 story 创建新的 story
      */
-    public List<CommandResult> executeChain(List<StringCommandCallback> callbacks) 
-            throws CommandExecutionException {
-        List<CommandResult> results = new ArrayList<>();
-        CommandResult previousResult = null;
+    public String createStoryFromTemplate(String templateStoryId, String newSummary) {
+        try {
+            // 1. 获取模板 story 的完整信息
+            String getUrl = String.format("%s/rest/api/2/issue/%s", jiraBaseUrl, templateStoryId);
+            HttpResponse templateResponse = httpClient.httpRequest(getUrl, "GET");
+            JsonObject templateIssue = JsonParser.parseString(templateResponse.getText()).getAsJsonObject();
+            JsonObject templateFields = templateIssue.getAsJsonObject("fields");
+            
+            // 2. 获取项目和 issue 类型
+            String projectKey = templateFields.getAsJsonObject("project").get("key").getAsString();
+            String issueTypeName = templateFields.getAsJsonObject("issuetype").get("name").getAsString();
+            
+            // 3. 获取可创建的自定义字段列表
+            Set<String> creatableFields = getCreatableCustomFields(projectKey, issueTypeName);
+            
+            // 4. 构建新 story 的字段
+            Map<String, Object> newFields = new HashMap<>();
+            
+            // 必需的基本字段
+            Map<String, String> project = new HashMap<>();
+            project.put("key", projectKey);
+            newFields.put("project", project);
+            
+            Map<String, String> issuetype = new HashMap<>();
+            issuetype.put("name", issueTypeName);
+            newFields.put("issuetype", issuetype);
+            
+            newFields.put("summary", newSummary);
+            
+            // 可选的基本字段
+            if (templateFields.has("description") && !templateFields.get("description").isJsonNull()) {
+                newFields.put("description", templateFields.get("description").getAsString());
+            }
+            
+            if (templateFields.has("priority") && !templateFields.get("priority").isJsonNull()) {
+                Map<String, String> priority = new HashMap<>();
+                priority.put("name", templateFields.getAsJsonObject("priority").get("name").getAsString());
+                newFields.put("priority", priority);
+            }
+            
+            if (templateFields.has("assignee") && !templateFields.get("assignee").isJsonNull()) {
+                Map<String, String> assignee = new HashMap<>();
+                assignee.put("name", templateFields.getAsJsonObject("assignee").get("name").getAsString());
+                newFields.put("assignee", assignee);
+            }
+            
+            if (templateFields.has("labels") && !templateFields.get("labels").isJsonNull()) {
+                JsonArray labelsArray = templateFields.getAsJsonArray("labels");
+                List<String> labels = new ArrayList<>();
+                for (JsonElement label : labelsArray) {
+                    labels.add(label.getAsString());
+                }
+                if (!labels.isEmpty()) {
+                    newFields.put("labels", labels);
+                }
+            }
+            
+            if (templateFields.has("components") && !templateFields.get("components").isJsonNull()) {
+                JsonArray componentsArray = templateFields.getAsJsonArray("components");
+                List<Map<String, String>> components = new ArrayList<>();
+                for (JsonElement comp : componentsArray) {
+                    Map<String, String> component = new HashMap<>();
+                    component.put("name", comp.getAsJsonObject().get("name").getAsString());
+                    components.add(component);
+                }
+                if (!components.isEmpty()) {
+                    newFields.put("components", components);
+                }
+            }
+            
+            // 5. 复制允许创建的自定义字段
+            for (String fieldKey : creatableFields) {
+                if (templateFields.has(fieldKey) && !templateFields.get(fieldKey).isJsonNull()) {
+                    JsonElement fieldValue = templateFields.get(fieldKey);
+                    
+                    // 直接复制字段值（Gson 会处理类型转换）
+                    if (fieldValue.isJsonObject()) {
+                        newFields.put(fieldKey, gson.fromJson(fieldValue, Map.class));
+                    } else if (fieldValue.isJsonArray()) {
+                        newFields.put(fieldKey, gson.fromJson(fieldValue, List.class));
+                    } else if (fieldValue.isJsonPrimitive()) {
+                        newFields.put(fieldKey, fieldValue.getAsString());
+                    }
+                }
+            }
+            
+            // 6. 创建新 story
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("fields", newFields);
+            
+            String createUrl = String.format("%s/rest/api/2/issue/", jiraBaseUrl);
+            String requestBody = gson.toJson(payload);
+            
+            HttpResponse createResponse = httpClient.httpRequest(createUrl, "POST", requestBody);
+            JsonObject createdIssue = JsonParser.parseString(createResponse.getText()).getAsJsonObject();
+            
+            String newIssueKey = createdIssue.get("key").getAsString();
+            System.out.println("Successfully created story: " + newIssueKey);
+            
+            return newIssueKey;
+            
+        } catch (Exception e) {
+            System.err.println("Error creating story from template: " + e.getMessage());
+            e.printStackTrace();
+            throw new RuntimeException("Failed to create story", e);
+        }
+    }
+    
+    /**
+     * 批量从模板创建多个 story
+     */
+    public List<String> createBulkStoriesFromTemplate(String templateStoryId, List<String> summaries) {
+        List<String> createdStories = new ArrayList<>();
         
-        for (int i = 0; i < callbacks.size(); i++) {
-            System.out.println("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-            System.out.println("【Callback " + (i + 1) + "】");
-            System.out.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-            
-            StringCommandCallback callback = callbacks.get(i);
-            
-            // 打印上一个结果的信息
-            if (previousResult != null) {
-                System.out.println("【上一个命令结果】");
-                System.out.println("  成功: " + previousResult.isSuccess());
-                System.out.println("  退出码: " + previousResult.getExitCode());
-                System.out.println("  输出长度: " + previousResult.getOutput().length() + " 字符");
-                System.out.println("  错误长度: " + previousResult.getError().length() + " 字符");
+        for (String summary : summaries) {
+            try {
+                String newStoryKey = createStoryFromTemplate(templateStoryId, summary);
+                createdStories.add(newStoryKey);
                 
-                if (!previousResult.getOutput().isEmpty()) {
-                    // 只显示前200字符的预览
-                    String preview = previousResult.getOutput();
-                    if (preview.length() > 200) {
-                        preview = preview.substring(0, 200) + "...";
-                    }
-                    System.out.println("  输出预览: " + preview);
+                // 避免请求过快
+                Thread.sleep(500);
+                
+            } catch (Exception e) {
+                System.err.println("Failed to create story with summary: " + summary);
+                System.err.println("Error: " + e.getMessage());
+            }
+        }
+        
+        return createdStories;
+    }
+    
+    /**
+     * 获取模板 story 的字段信息（用于预览）
+     */
+    public Map<String, Object> getTemplateInfo(String storyId) {
+        try {
+            String getUrl = String.format("%s/rest/api/2/issue/%s", jiraBaseUrl, storyId);
+            HttpResponse response = httpClient.httpRequest(getUrl, "GET");
+            JsonObject issue = JsonParser.parseString(response.getText()).getAsJsonObject();
+            JsonObject fields = issue.getAsJsonObject("fields");
+            
+            Map<String, Object> templateInfo = new HashMap<>();
+            
+            // 基本信息
+            templateInfo.put("key", issue.get("key").getAsString());
+            templateInfo.put("summary", fields.get("summary").getAsString());
+            templateInfo.put("issueType", fields.getAsJsonObject("issuetype").get("name").getAsString());
+            templateInfo.put("project", fields.getAsJsonObject("project").get("key").getAsString());
+            
+            // 描述
+            if (fields.has("description") && !fields.get("description").isJsonNull()) {
+                templateInfo.put("description", fields.get("description").getAsString());
+            }
+            
+            // 自定义字段
+            Map<String, Object> customFields = new HashMap<>();
+            for (Map.Entry<String, JsonElement> entry : fields.entrySet()) {
+                if (entry.getKey().startsWith("customfield_") && !entry.getValue().isJsonNull()) {
+                    customFields.put(entry.getKey(), entry.getValue());
                 }
-            } else {
-                System.out.println("【上一个命令结果】null (这是第一个命令)");
             }
+            templateInfo.put("customFields", customFields);
             
-            // 调用 callback 构造命令（返回字符串）
-            String commandString = callback.buildCommand(previousResult);
+            return templateInfo;
             
-            if (commandString == null || commandString.isEmpty()) {
-                System.out.println("【结束】callback 返回 null/空字符串,命令链结束");
-                break;
-            }
-            
-            // 执行命令
-            CommandResult result = execute(commandString);
-            results.add(result);
-            
-            // 检查是否需要停止
-            if (!result.isSuccess() && callback.stopOnFailure()) {
-                System.out.println("【停止】命令失败且 stopOnFailure=true");
-                break;
-            }
-            
-            previousResult = result;
-        }
-        
-        System.out.println("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-        System.out.println("【命令链完成】共执行 " + results.size() + " 个命令");
-        System.out.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-        
-        return results;
-    }
-    
-    /**
-     * 构建完整命令（包含前置命令）
-     */
-    private String buildFullCommand(String command) {
-        if (commonPrefixCommands.isEmpty()) {
-            return command;
-        }
-        
-        // 用 && 连接所有命令
-        List<String> allCommands = new ArrayList<>(commonPrefixCommands);
-        allCommands.add(command);
-        return String.join(" && ", allCommands);
-    }
-    
-    enum OsType {
-        WINDOWS, UNIX
-    }
-    
-    public static class CommandResult {
-        private final int exitCode;
-        private final String output;
-        private final String error;
-        private final boolean success;
-        
-        public CommandResult(int exitCode, String output, String error, boolean success) {
-            this.exitCode = exitCode;
-            this.output = output;
-            this.error = error;
-            this.success = success;
-        }
-        
-        public int getExitCode() { return exitCode; }
-        public String getOutput() { return output; }
-        public String getError() { return error; }
-        public boolean isSuccess() { return success; }
-        
-        @Override
-        public String toString() {
-            return "CommandResult{exitCode=" + exitCode + ", success=" + success + 
-                   ", outputLength=" + output.length() + ", errorLength=" + error.length() + "}";
+        } catch (Exception e) {
+            System.err.println("Error getting template info: " + e.getMessage());
+            throw new RuntimeException("Failed to get template info", e);
         }
     }
-    
-    /**
-     * 字符串命令回调接口
-     * 返回字符串命令，而不是字符串数组
-     */
-    @FunctionalInterface
-    public interface StringCommandCallback {
-        /**
-         * 根据上一个命令的结果构造下一个命令（字符串形式）
-         * @param previousResult 上一个命令的结果
-         * @return 要执行的命令字符串，返回 null 表示结束链
-         */
-        String buildCommand(CommandResult previousResult);
-        
-        /**
-         * 是否在失败时停止
-         */
-        default boolean stopOnFailure() {
-            return true;
-        }
-    }
-    
-    public static class CommandExecutionException extends Exception {
-        public CommandExecutionException(String message) {
-            super(message);
-        }
-        
-        public CommandExecutionException(String message, Throwable cause) {
-            super(message, cause);
-        }
-    }
+}
+
+// HttpClient 和 HttpResponse 接口定义（需要根据你的实现调整）
+interface HttpClient {
+    HttpResponse httpRequest(String url, String method);
+    HttpResponse httpRequest(String url, String method, String body);
+}
+
+interface HttpResponse {
+    String getText();
+    int getStatusCode();
 }
