@@ -249,3 +249,34 @@ interface HttpResponse {
     String getText();
     int getStatusCode();
 }
+
+
+
+// 在类中添加这个辅助方法
+private Object convertJsonElementToObject(JsonElement element) {
+    if (element.isJsonNull()) {
+        return null;
+    } else if (element.isJsonPrimitive()) {
+        JsonPrimitive primitive = element.getAsJsonPrimitive();
+        if (primitive.isBoolean()) {
+            return primitive.getAsBoolean();
+        } else if (primitive.isNumber()) {
+            return primitive.getAsNumber();
+        } else {
+            return primitive.getAsString();
+        }
+    } else if (element.isJsonArray()) {
+        List<Object> list = new ArrayList<>();
+        for (JsonElement item : element.getAsJsonArray()) {
+            list.add(convertJsonElementToObject(item));
+        }
+        return list;
+    } else if (element.isJsonObject()) {
+        Map<String, Object> map = new HashMap<>();
+        for (Map.Entry<String, JsonElement> entry : element.getAsJsonObject().entrySet()) {
+            map.put(entry.getKey(), convertJsonElementToObject(entry.getValue()));
+        }
+        return map;
+    }
+    return null;
+}
