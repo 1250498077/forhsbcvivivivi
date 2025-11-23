@@ -1,3 +1,31 @@
+JsonElement sprintElement = entry.getValue();
+            
+            if (sprintElement.isJsonArray()) {
+                JsonArray sprintArray = sprintElement.getAsJsonArray();
+                List<Integer> sprintIds = new ArrayList<>();
+                
+                for (JsonElement element : sprintArray) {
+                    if (element.isJsonPrimitive() && element.getAsJsonPrimitive().isString()) {
+                        String sprintStr = element.getAsString();
+                        
+                        // 从字符串中提取 ID
+                        // 格式: "...Sprint@xxx[...id=12345,..."
+                        Integer sprintId = extractSprintId(sprintStr);
+                        
+                        if (sprintId != null) {
+                            sprintIds.add(sprintId);
+                            log.info("Extracted sprint ID: {}", sprintId);
+                        }
+                    }
+                }
+                
+                if (!sprintIds.isEmpty()) {
+                    newFields1.put(fieldKey, sprintIds);
+                }
+            }
+
+
+
 Map<String, Object> newFields1 = new HashMap<>();
 
 // 定义需要提取 ID 的字段
