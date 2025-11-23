@@ -1,4 +1,55 @@
+Map<String, Object> newFields1 = new HashMap<>();
 
+// 定义需要提取 ID 的字段
+Set<String> fieldsNeedIdExtraction = Set.of(
+    "customfield_10720"  // Sprint 字段
+    // 如果有其他类似字段，在这里添加
+);
+
+for (Map.Entry<String, JsonElement> entry : fields.entrySet()) {
+    String fieldKey = entry.getKey();
+    
+    if (fieldKey.startsWith("customfield_") && !entry.getValue().isJsonNull()) {
+        
+        // 需要提取 ID 的字段
+        if (fieldsNeedIdExtraction.contains(fieldKey)) {
+            JsonElement element = entry.getValue();
+            
+            if (element.isJsonArray()) {
+                JsonArray array = element.getAsJsonArray();
+                List<Integer> ids = new ArrayList<>();
+                
+                for (JsonElement item : array) {
+                    if (item.isJsonObject()) {
+                        JsonObject obj = item.getAsJsonObject();
+                        if (obj.has("id")) {
+                            ids.add(obj.get("id").getAsInt());
+                        }
+                    }
+                }
+                
+                if (!ids.isEmpty()) {
+                    newFields1.put(fieldKey, ids);
+                }
+            } else if (element.isJsonObject()) {
+                // 如果是单个对象而不是数组
+                JsonObject obj = element.getAsJsonObject();
+                if (obj.has("id")) {
+                    newFields1.put(fieldKey, obj.get("id").getAsInt());
+                }
+            }
+        } 
+        // 其他自定义字段正常处理
+        else {
+            try {
+                Object value = gson.fromJson(entry.getValue(), Object.class);
+                newFields1.put(fieldKey, value);
+            } catch (Exception e) {
+                log.warn("Failed to process field {}: {}", fieldKey, e.getMessage());
+            }
+        }
+    }
+}
 
 
 public Set<String> getCreatableCustomFields(String projectKey, String issueType) {
