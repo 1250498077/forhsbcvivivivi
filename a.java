@@ -1,3 +1,37 @@
+
+
+public boolean deleteIssue(String issueKey) {
+    try {
+        String url = String.format(
+            "%s/rest/api/2/issue/%s",
+            JIRA_BASE_URL,
+            issueKey
+        );
+        
+        HttpResponse response = httpClient.httpRequest(
+            url, 
+            method: "DELETE", 
+            jsonPayload: null
+        );
+        
+        if (response.code() == 204) {  // 204 = No Content (成功删除)
+            log.info("Successfully deleted issue: {}", issueKey);
+            return true;
+        } else {
+            log.error("Failed to delete issue: {} - Status: {}", 
+                issueKey, response.code());
+            return false;
+        }
+        
+    } catch (Exception e) {
+        log.error("Error deleting issue: {}", issueKey, e);
+        return false;
+    }
+}
+
+
+
+
 / 辅助方法：从 Sprint 字符串中提取 ID
 private Integer extractSprintId(String sprintStr) {
     try {
