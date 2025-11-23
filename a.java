@@ -1,3 +1,25 @@
+/ 辅助方法：从 Sprint 字符串中提取 ID
+private Integer extractSprintId(String sprintStr) {
+    try {
+        // 方法1：使用正则表达式提取 id= 后面的数字
+        Pattern pattern = Pattern.compile("id=(\\d+)");
+        Matcher matcher = pattern.matcher(sprintStr);
+        
+        if (matcher.find()) {
+            return Integer.parseInt(matcher.group(1));
+        }
+        
+        // 方法2：如果没找到 id=，尝试提取 @ 后面的数字（不太可靠）
+        // Sprint@76a142e1 这种格式
+        
+    } catch (Exception e) {
+        log.error("Failed to extract sprint ID from: {}", sprintStr, e);
+    }
+    
+    return null;
+}
+
+
 JsonElement sprintElement = entry.getValue();
             
             if (sprintElement.isJsonArray()) {
