@@ -1,3 +1,18 @@
+
+
+
+public List<String> getCreatableCustomFields(String projectKey, String issueType) {
+    // 获取创建 issue 时可用的字段
+    String metaUrl = "https://wpb-jira.systems.uk.hsbc/rest/api/2/issue/createmeta?projectKeys=${projectKey}&issuetypeNames=${issueType}&expand=projects.issuetypes.fields";
+    
+    HttpResponse httpResponse = httpClient.httpRequest(metaUrl, method: "GET");
+    def meta = new JsonSlurper().parseText(httpResponse.getText());
+    
+    def fields = meta.projects[0]?.issuetypes[0]?.fields;
+    
+    // 返回所有可创建的字段（包括自定义字段）
+    return fields.keySet().findAll { it.startsWith("customfield_") };
+}
 public String createStoryFromTemplate(String templateStoryId, String newSummary, String newDescription) {
     try {
         // 1. 获取模板 story（使用 issue API）
