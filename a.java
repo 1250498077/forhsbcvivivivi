@@ -1,17 +1,62 @@
 
 
 
-public List<String> getCreatableCustomFields(String projectKey, String issueType) {
-    // 获取创建 issue 时可用的字段
-    String metaUrl = "https://wpb-jira.systems.uk.hsbc/rest/api/2/issue/createmeta?projectKeys=${projectKey}&issuetypeNames=${issueType}&expand=projects.issuetypes.fields";
-    
-    HttpResponse httpResponse = httpClient.httpRequest(metaUrl, method: "GET");
-    def meta = new JsonSlurper().parseText(httpResponse.getText());
-    
-    def fields = meta.projects[0]?.issuetypes[0]?.fields;
-    
-    // 返回所有可创建的字段（包括自定义字段）
-    return fields.keySet().findAll { it.startsWith("customfield_") };
+public Set<String> getCreatableCustomFields(String projectKey, String issueType) {
+    try {
+        // URL 编码
+        String encodedIssueType = URLEncoder.encode(issueType, StandardCharsets.UTF_8);
+        
+        // 注意：Java 中使用 String.format，不是 Groovy 的 ${} 语法
+        String metaUrl = String.format(
+            "https://wpb-jira.systems.uk.hsbc/rest/api/2/issue/createmeta?projectKeys=%s&issuetypeNames=%s&expand=projects.issuetypes.fields",
+            projectKey, 
+            encodedIssueType
+        );
+        
+        HttpResponse httpResponse = httpClient.httpRequest(metaUrl, "GET", null);
+        
+        // 使用 JsonParser 解析（不是 JsonSlurper）
+        JsonObject meta = JsonParser.parseString(httpResponse.getText()).getAsJsonObject();
+        
+        // 获取 projects 数组
+        JsonArray projects = meta.getAsJsonArray("projects");
+        if (projects == null || projects.size() == 0) {
+            System.out.println("No projects found in createmeta");
+            return new HashSet<>();
+        }
+        
+        // 获取第一个 project
+        JsonObject project = projects.get(0).getAsJsonObject();
+        JsonArray issuetypes = project.getAsJsonArray("issuetypes");
+        if (issuetypes == null || issuetypes.size() == 0) {
+            System.out.println("No issue types found");
+            return new HashSet<>();
+        }
+        
+        // 获取第一个 issuetype 的 fields
+        JsonObject issuetype = issuetypes.get(0).getAsJsonObject();
+        JsonObject fields = issuetype.getAsJsonObject("fields");
+        if (fields == null) {
+            System.out.println("No fields found");
+            return new HashSet<>();
+        }
+        
+        // 过滤出所有 customfield_ 开头的字段
+        Set<String> creatableFields = new HashSet<>();
+        for (String fieldKey : fields.keySet()) {
+            if (fieldKey.startsWith("customfield_")) {
+                creatableFields.add(fieldKey);
+            }
+        }
+        
+        System.out.println("Found " + creatableFields.size() + " creatable custom fields");
+        return creatableFields;
+        
+    } catch (Exception e) {
+        System.err.println("Error getting creatable fields: " + e.getMessage());
+        e.printStackTrace();
+        return new HashSet<>();
+    }
 }
 public String createStoryFromTemplate(String templateStoryId, String newSummary, String newDescription) {
     try {
