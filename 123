@@ -1,0 +1,24 @@
+[5/11] Compile [x64] Module.kongbu.4.cpp
+[6/11] Compile [x64] Module.kongbu.1.cpp
+[7/11] Compile [x64] Module.kongbu.6.cpp
+D:\game\kongbu\Source\kongbu\Private\WomenNativeAnimInstance.cpp(514,38): error C2445: 条件表达式的 result 类型有歧义: 类型“T *”和“const TObjectPtr<UAnimSequenceBase>”可转换为多个常见类型
+        with
+        [
+            T=UAnimSequenceBase
+        ]
+                      : AnimationSet ? AnimationSet->IdlePose : nullptr;
+                                     ^
+D:\game\kongbu\Source\kongbu\Private\WomenNativeAnimInstance.cpp(514,38): note: 可能是“T *”
+        with
+        [
+            T=UAnimSequenceBase
+        ]
+D:\game\kongbu\Source\kongbu\Private\WomenNativeAnimInstance.cpp(514,38): note: 或    “const TObjectPtr<UAnimSequenceBase>”
+[8/11] Compile [x64] Module.kongbu.5.cpp
+Trace written to file C:/Users/mwh/AppData/Local/UnrealBuildTool/Log.uba with size 24.0kb
+Total time in Unreal Build Accelerator local executor: 235.14 seconds
+
+Result: Failed (OtherCompilationError)
+Total execution time: 322.47 seconds
+
+❌ Build 失败，请查看 build_log.txt
