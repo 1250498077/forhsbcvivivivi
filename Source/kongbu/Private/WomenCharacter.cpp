@@ -1,0 +1,548 @@
+// WomenCharacter.cpp
+#include "WomenCharacter.h"
+#include "PickupActor.h"
+#include "MyPlayerController.h"
+#include "Camera/CameraComponent.h"
+#include "Components/CapsuleComponent.h"
+#include "Components/SceneComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Net/UnrealNetwork.h"
+
+namespace
+{
+    static const TArray<FName>& GetFirstPersonUpperMeshHiddenBoneNames()
+    {
+        static const TArray<FName> BoneNames =
+        {
+            TEXT("LeftUpLeg"),
+            TEXT("LeftLeg"),
+            TEXT("LeftFoot"),
+            TEXT("LeftToeBase"),
+            TEXT("LeftToe_End"),
+            TEXT("RightUpLeg"),
+            TEXT("RightLeg"),
+            TEXT("RightFoot"),
+            TEXT("RightToeBase"),
+            TEXT("RightToe_End"),
+            TEXT("Neck"),
+            TEXT("Head"),
+            TEXT("HeadTop_End")
+        };
+
+        return BoneNames;
+    }
+
+    static const TArray<FName>& GetFirstPersonLowerMeshHiddenBoneNames()
+    {
+        static const TArray<FName> BoneNames =
+        {
+            TEXT("Spine"),
+            TEXT("Spine1"),
+            TEXT("Spine2"),
+            TEXT("LeftShoulder"),
+            TEXT("LeftArm"),
+            TEXT("LeftForeArm"),
+            TEXT("LeftHand"),
+            TEXT("LeftHandIndex1"),
+            TEXT("LeftHandIndex2"),
+            TEXT("LeftHandIndex3"),
+            TEXT("LeftHandIndex4"),
+            TEXT("LeftHandMiddle1"),
+            TEXT("LeftHandMiddle2"),
+            TEXT("LeftHandMiddle3"),
+            TEXT("LeftHandMiddle4"),
+            TEXT("LeftHandPinky1"),
+            TEXT("LeftHandPinky2"),
+            TEXT("LeftHandPinky3"),
+            TEXT("LeftHandPinky4"),
+            TEXT("LeftHandRing1"),
+            TEXT("LeftHandRing2"),
+            TEXT("LeftHandRing3"),
+            TEXT("LeftHandRing4"),
+            TEXT("LeftHandThumb1"),
+            TEXT("LeftHandThumb2"),
+            TEXT("LeftHandThumb3"),
+            TEXT("LeftHandThumb4"),
+            TEXT("RightShoulder"),
+            TEXT("RightArm"),
+            TEXT("RightForeArm"),
+            TEXT("RightHand"),
+            TEXT("RightSocket"),
+            TEXT("RightHandIndex1"),
+            TEXT("RightHandIndex2"),
+            TEXT("RightHandIndex3"),
+            TEXT("RightHandIndex4"),
+            TEXT("RightHandMiddle1"),
+            TEXT("RightHandMiddle2"),
+            TEXT("RightHandMiddle3"),
+            TEXT("RightHandMiddle4"),
+            TEXT("RightHandPinky1"),
+            TEXT("RightHandPinky2"),
+            TEXT("RightHandPinky3"),
+            TEXT("RightHandPinky4"),
+            TEXT("RightHandRing1"),
+            TEXT("RightHandRing2"),
+            TEXT("RightHandRing3"),
+            TEXT("RightHandRing4"),
+            TEXT("RightHandThumb1"),
+            TEXT("RightHandThumb2"),
+            TEXT("RightHandThumb3"),
+            TEXT("RightHandThumb4"),
+            TEXT("Neck"),
+            TEXT("Head"),
+            TEXT("HeadTop_End")
+        };
+
+        return BoneNames;
+    }
+
+    static void HideBonesByNames(USkeletalMeshComponent* MeshComponent, const TArray<FName>& BoneNames)
+    {
+        if (!MeshComponent)
+        {
+            return;
+        }
+
+        for (const FName BoneName : BoneNames)
+        {
+            if (MeshComponent->GetBoneIndex(BoneName) != INDEX_NONE)
+            {
+                MeshComponent->HideBoneByName(BoneName, EPhysBodyOp::PBO_None);
+            }
+        }
+    }
+
+    static void CopySkeletalMeshSetup(USkeletalMeshComponent* TargetMesh, USkeletalMeshComponent* SourceMesh)
+    {
+        if (!TargetMesh || !SourceMesh)
+        {
+            return;
+        }
+
+        if (USkeletalMesh* SkeletalMesh = SourceMesh->GetSkeletalMeshAsset())
+        {
+            for (int32 MaterialIndex = 0; MaterialIndex < TargetMesh->GetNumMaterials(); ++MaterialIndex)
+            {
+                TargetMesh->SetMaterial(MaterialIndex, nullptr);
+            }
+
+            TargetMesh->SetSkeletalMeshAsset(SkeletalMesh);
+
+            const int32 MaterialCount = SourceMesh->GetNumMaterials();
+            for (int32 MaterialIndex = 0; MaterialIndex < MaterialCount; ++MaterialIndex)
+            {
+                TargetMesh->SetMaterial(MaterialIndex, SourceMesh->GetMaterial(MaterialIndex));
+            }
+        }
+    }
+
+    static void ConfigureModularMeshComponent(USkeletalMeshComponent* MeshComponent, USkeletalMeshComponent* ParentMesh)
+    {
+        if (!MeshComponent || !ParentMesh)
+        {
+            return;
+        }
+
+        MeshComponent->SetupAttachment(ParentMesh);
+        MeshComponent->SetOnlyOwnerSee(false);
+        MeshComponent->SetOwnerNoSee(true);
+        MeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        MeshComponent->SetGenerateOverlapEvents(false);
+        MeshComponent->SetCastShadow(true);
+        MeshComponent->bCastDynamicShadow = true;
+        MeshComponent->bCastHiddenShadow = true;
+    }
+
+
+}
+
+
+
+
+
+AWomenCharacter::AWomenCharacter()
+{
+    bReplicates = true;
+    SetReplicateMovement(true);
+
+    // Third-person full body: other players can see it,
+    // but it still casts the owner's full-body shadow.
+    GetMesh()->SetOwnerNoSee(false);
+    GetMesh()->SetHiddenInGame(false);
+    GetMesh()->SetCastShadow(true);
+    GetMesh()->bCastHiddenShadow = true;
+    GetMesh()->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+
+
+    PrimaryActorTick.bCanEverTick = true;
+
+    FirstPersonCameraRoot = CreateDefaultSubobject<USceneComponent>(TEXT("FirstPersonCameraRoot"));
+    FirstPersonCameraRoot->SetupAttachment(GetCapsuleComponent());
+    FirstPersonCameraRoot->SetRelativeLocation(FVector(0.f, 0.f, StandingCameraHeight) + FirstPersonCameraLocationOffset);
+    FirstPersonCameraRoot->SetRelativeRotation(FirstPersonCameraRotationOffset);
+
+    FirstPersonCameraComponent = CreateDefaultSubobject<UCameraComponent>(TEXT("FirstPersonCamera"));
+    FirstPersonCameraComponent->SetupAttachment(FirstPersonCameraRoot);
+
+
+    FirstPersonCameraComponent->SetRelativeLocation(FVector::ZeroVector);
+    FirstPersonCameraComponent->SetRelativeRotation(FRotator::ZeroRotator);
+
+    FirstPersonCameraComponent->bUsePawnControlRotation = true;
+
+    // 第一人称上半身/手臂: 挂在相机下, 跟随视角 Pitch。
+    FirstPersonMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("FirstPersonMesh"));
+    FirstPersonMesh->SetupAttachment(FirstPersonCameraComponent);
+    FirstPersonMesh->SetRelativeLocation(GetMesh()->GetRelativeLocation() + FirstPersonUpperBodyLocationOffset);
+    FirstPersonMesh->SetRelativeRotation(GetMesh()->GetRelativeRotation() + FirstPersonUpperBodyRotationOffset);
+    FirstPersonMesh->SetRelativeScale3D(GetMesh()->GetRelativeScale3D());
+    FirstPersonMesh->SetOnlyOwnerSee(true);
+    FirstPersonMesh->SetOwnerNoSee(false);
+    FirstPersonMesh->SetHiddenInGame(true);
+    FirstPersonMesh->SetCastShadow(false);
+    FirstPersonMesh->bCastDynamicShadow = false;
+    FirstPersonMesh->bCastHiddenShadow = false;
+    FirstPersonMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    FirstPersonMesh->SetGenerateOverlapEvents(false);
+
+    // 第一人称下半身: 挂在身体坐标系下, 不跟随相机 Pitch。
+    FirstPersonLowerBodyMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("FirstPersonLowerBodyMesh"));
+    FirstPersonLowerBodyMesh->SetupAttachment(GetCapsuleComponent());
+    FirstPersonLowerBodyMesh->SetRelativeLocation(GetMesh()->GetRelativeLocation() + FirstPersonLowerBodyLocationOffset);
+    FirstPersonLowerBodyMesh->SetRelativeRotation(GetMesh()->GetRelativeRotation() + FirstPersonLowerBodyRotationOffset);
+    FirstPersonLowerBodyMesh->SetRelativeScale3D(GetMesh()->GetRelativeScale3D());
+    FirstPersonLowerBodyMesh->SetOnlyOwnerSee(true);
+    FirstPersonLowerBodyMesh->SetOwnerNoSee(false);
+    FirstPersonLowerBodyMesh->SetHiddenInGame(true);
+    FirstPersonLowerBodyMesh->SetCastShadow(false);
+    FirstPersonLowerBodyMesh->bCastDynamicShadow = false;
+    FirstPersonLowerBodyMesh->bCastHiddenShadow = false;
+    FirstPersonLowerBodyMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    FirstPersonLowerBodyMesh->SetGenerateOverlapEvents(false);
+    FirstPersonLowerBodyMesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+
+    ThirdPersonHeldItemDebugMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ThirdPersonHeldItemDebugMesh"));
+    ThirdPersonHeldItemDebugMesh->SetupAttachment(GetMesh());
+    ThirdPersonHeldItemDebugMesh->SetOnlyOwnerSee(true);
+    ThirdPersonHeldItemDebugMesh->SetOwnerNoSee(false);
+    ThirdPersonHeldItemDebugMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    ThirdPersonHeldItemDebugMesh->SetGenerateOverlapEvents(false);
+    ThirdPersonHeldItemDebugMesh->SetCastShadow(false);
+    ThirdPersonHeldItemDebugMesh->bCastDynamicShadow = false;
+    ThirdPersonHeldItemDebugMesh->bCastHiddenShadow = false;
+    ThirdPersonHeldItemDebugMesh->SetHiddenInGame(true);
+
+    HeadMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("HeadMesh"));
+    ConfigureModularMeshComponent(HeadMesh, GetMesh());
+
+    HairMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("HairMesh"));
+    ConfigureModularMeshComponent(HairMesh, GetMesh());
+
+    TopMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("Topmesh"));
+    ConfigureModularMeshComponent(TopMesh, GetMesh());
+
+    HandMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("HandMesh"));
+    ConfigureModularMeshComponent(HandMesh, GetMesh());
+
+    PantsMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("PantsMesh"));
+    ConfigureModularMeshComponent(PantsMesh, GetMesh());
+
+    ShoesMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("ShoesMesh"));
+    ConfigureModularMeshComponent(ShoesMesh, GetMesh());
+
+    HoldPoint = CreateDefaultSubobject<USceneComponent>(TEXT("HoldPoint"));
+    HoldPoint->SetupAttachment(FirstPersonCameraComponent);
+
+    HoldPoint->SetRelativeLocation(FVector(80.f, 20.f, -15.f));
+}
+
+void AWomenCharacter::OnConstruction(const FTransform& Transform)
+{
+    Super::OnConstruction(Transform);
+
+    RefreshModularMeshes();
+}
+
+
+void AWomenCharacter::TeleportToLocation(FVector NewLocation, FRotator NewRotation)
+{
+    SetActorLocation(NewLocation);
+    SetActorRotation(NewRotation);
+
+}
+
+void AWomenCharacter::TeleportToTarget(AActor* TargetActor)
+{
+    if (TargetActor)
+    {
+        FVector TargetLocation = TargetActor->GetActorLocation();
+        FRotator TargetRotation = TargetActor->GetActorRotation();
+        TeleportTo(TargetLocation, TargetRotation);
+    }
+}
+
+void AWomenCharacter::BeginPlay()
+{
+    Super::BeginPlay();
+
+    RefreshModularMeshes();
+}
+
+void AWomenCharacter::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+
+    if (!FirstPersonCameraRoot)
+    {
+        return;
+    }
+
+    FVector CameraRelativeLocation = FirstPersonCameraLocationOffset;
+    const float TargetCameraHeight = IsSquat ? CrouchingCameraHeight : StandingCameraHeight;
+
+    if (CameraCrouchInterpSpeed <= 0.f)
+    {
+        CameraRelativeLocation.Z += TargetCameraHeight;
+    }
+    else
+    {
+        const float CurrentCameraHeight = FirstPersonCameraRoot->GetRelativeLocation().Z - FirstPersonCameraLocationOffset.Z - SmoothedFirstPersonCameraMovementOffset.Z;
+        CameraRelativeLocation.Z = FMath::FInterpTo(
+            CurrentCameraHeight,
+            TargetCameraHeight,
+            DeltaTime,
+            CameraCrouchInterpSpeed
+        ) + FirstPersonCameraLocationOffset.Z;
+    }
+
+    CameraRelativeLocation += CalculateFirstPersonCameraMovementOffset(DeltaTime);
+
+    FirstPersonCameraRoot->SetRelativeLocation(CameraRelativeLocation);
+    FirstPersonCameraRoot->SetRelativeRotation(FirstPersonCameraRotationOffset);
+
+    #if WITH_EDITOR || UE_BUILD_DEVELOPMENT
+        Debug_TickOffsetTuning();
+    #endif
+}
+
+#if WITH_EDITOR || UE_BUILD_DEVELOPMENT
+void AWomenCharacter::Debug_TickOffsetTuning()
+{
+    if (!IsLocallyControlled()) return;
+
+    AMyPlayerController* PC = Cast<AMyPlayerController>(GetController());
+    APickupActor* HeldItem = PC ? PC->GetHeldActor() : nullptr;
+    if (!HeldItem) return;
+
+    const float Step    = 1.0f;
+    const float RotStep = 5.0f;
+
+    bool bChanged = false;
+    FVector  DeltaLoc = FVector::ZeroVector;
+    FRotator DeltaRot = FRotator::ZeroRotator;
+
+    if (GetWorld()->GetFirstPlayerController()->IsInputKeyDown(EKeys::NumPadEight)) { DeltaLoc.X += Step;  bChanged = true; }
+    if (GetWorld()->GetFirstPlayerController()->IsInputKeyDown(EKeys::NumPadTwo))   { DeltaLoc.X -= Step;  bChanged = true; }
+    if (GetWorld()->GetFirstPlayerController()->IsInputKeyDown(EKeys::NumPadFour))  { DeltaLoc.Y -= Step;  bChanged = true; }
+    if (GetWorld()->GetFirstPlayerController()->IsInputKeyDown(EKeys::NumPadSix))   { DeltaLoc.Y += Step;  bChanged = true; }
+    if (GetWorld()->GetFirstPlayerController()->IsInputKeyDown(EKeys::NumPadSeven)) { DeltaLoc.Z += Step;  bChanged = true; }
+    if (GetWorld()->GetFirstPlayerController()->IsInputKeyDown(EKeys::NumPadNine))  { DeltaLoc.Z -= Step;  bChanged = true; }
+    if (GetWorld()->GetFirstPlayerController()->IsInputKeyDown(EKeys::T)) { DeltaRot.Yaw += RotStep; bChanged = true; }
+    if (GetWorld()->GetFirstPlayerController()->IsInputKeyDown(EKeys::Y)) { DeltaRot.Yaw -= RotStep; bChanged = true; }
+    if (GetWorld()->GetFirstPlayerController()->IsInputKeyDown(EKeys::U)) { DeltaRot.Pitch += RotStep; bChanged = true; }
+    if (GetWorld()->GetFirstPlayerController()->IsInputKeyDown(EKeys::I)) { DeltaRot.Pitch -= RotStep; bChanged = true; }
+    if (GetWorld()->GetFirstPlayerController()->IsInputKeyDown(EKeys::O)) { DeltaRot.Roll  += RotStep; bChanged = true; }
+    if (GetWorld()->GetFirstPlayerController()->IsInputKeyDown(EKeys::P)) { DeltaRot.Roll  -= RotStep; bChanged = true; }
+
+    if (!bChanged) return;
+
+    // ===== 第四步的内容在这里 =====
+    HeldItem->Debug_AddFPLocationOffset(DeltaLoc);
+    HeldItem->Debug_AddFPRotationOffset(DeltaRot);
+
+    HeldItem->SetActorRelativeLocation(HeldItem->Debug_GetFPLocationOffset());
+    HeldItem->SetActorRelativeRotation(HeldItem->Debug_GetFPRotationOffset());
+
+    if (GEngine)
+    {
+        const FVector  Loc = HeldItem->Debug_GetFPLocationOffset();
+        const FRotator Rot = HeldItem->Debug_GetFPRotationOffset();
+        GEngine->AddOnScreenDebugMessage(42, 3.f, FColor::Cyan,
+            FString::Printf(
+                TEXT("Loc: X=%.1f Y=%.1f Z=%.1f | Rot: P=%.1f Y=%.1f R=%.1f"),
+                Loc.X, Loc.Y, Loc.Z, Rot.Roll, Rot.Pitch, Rot.Yaw
+            )
+        );
+    }
+}
+#endif
+
+FVector AWomenCharacter::CalculateFirstPersonCameraMovementOffset(float DeltaTime)
+{
+    const float MoveSpeed = GetVelocity().Size2D();
+    const FVector DesiredOffset = bEnableFirstPersonCameraMovementOffset
+        && MoveSpeed > FirstPersonCameraMovementOffsetSpeedThreshold
+        ? FirstPersonCameraMovementOffset
+        : FVector::ZeroVector;
+
+    if (FirstPersonCameraMovementOffsetInterpSpeed <= 0.f)
+    {
+        SmoothedFirstPersonCameraMovementOffset = DesiredOffset;
+    }
+    else
+    {
+        SmoothedFirstPersonCameraMovementOffset = FMath::VInterpTo(
+            SmoothedFirstPersonCameraMovementOffset,
+            DesiredOffset,
+            DeltaTime,
+            FirstPersonCameraMovementOffsetInterpSpeed);
+    }
+
+    return SmoothedFirstPersonCameraMovementOffset;
+}
+
+void AWomenCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+    DOREPLIFETIME(AWomenCharacter, IsSquat);
+    DOREPLIFETIME(AWomenCharacter, IsSprint);
+    DOREPLIFETIME(AWomenCharacter, IsSquatThrowing);
+    DOREPLIFETIME(AWomenCharacter, IsStandThrowing);
+    DOREPLIFETIME(AWomenCharacter, IsMiddleHandleTime);
+}
+
+void AWomenCharacter::RefreshModularMeshes()
+{
+    USkeletalMeshComponent* BaseMesh = GetMesh();
+    if (!BaseMesh)
+    {
+        return;
+    }
+
+    BaseMesh->SetOnlyOwnerSee(false);
+    BaseMesh->SetOwnerNoSee(false);
+    BaseMesh->SetHiddenInGame(false);
+    BaseMesh->SetCastShadow(true);
+    BaseMesh->bCastDynamicShadow = true;
+    BaseMesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+
+    if (FirstPersonMesh)
+    {
+        FirstPersonMesh->SetOnlyOwnerSee(true);
+        FirstPersonMesh->SetOwnerNoSee(false);
+        FirstPersonMesh->SetHiddenInGame(false);
+
+        if (!FirstPersonMesh->GetSkeletalMeshAsset())
+        {
+            CopySkeletalMeshSetup(FirstPersonMesh, BaseMesh);
+        }
+
+        FirstPersonMesh->SetRelativeLocation(BaseMesh->GetRelativeLocation() + FirstPersonUpperBodyLocationOffset);
+        FirstPersonMesh->SetRelativeRotation(BaseMesh->GetRelativeRotation() + FirstPersonUpperBodyRotationOffset);
+        FirstPersonMesh->SetRelativeScale3D(BaseMesh->GetRelativeScale3D());
+        HideBonesByNames(FirstPersonMesh, GetFirstPersonUpperMeshHiddenBoneNames());
+    }
+
+    if (FirstPersonLowerBodyMesh)
+    {
+        if (!FirstPersonLowerBodyMesh->GetSkeletalMeshAsset())
+        {
+            if (FirstPersonMesh && FirstPersonMesh->GetSkeletalMeshAsset())
+            {
+                CopySkeletalMeshSetup(FirstPersonLowerBodyMesh, FirstPersonMesh);
+            }
+            else
+            {
+                CopySkeletalMeshSetup(FirstPersonLowerBodyMesh, BaseMesh);
+            }
+        }
+
+        FirstPersonLowerBodyMesh->SetOnlyOwnerSee(true);
+        FirstPersonLowerBodyMesh->SetOwnerNoSee(false);
+        FirstPersonLowerBodyMesh->SetHiddenInGame(false);
+        FirstPersonLowerBodyMesh->SetRelativeLocation(BaseMesh->GetRelativeLocation() + FirstPersonLowerBodyLocationOffset);
+        FirstPersonLowerBodyMesh->SetRelativeRotation(BaseMesh->GetRelativeRotation() + FirstPersonLowerBodyRotationOffset);
+        FirstPersonLowerBodyMesh->SetRelativeScale3D(BaseMesh->GetRelativeScale3D());
+        FirstPersonLowerBodyMesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+        FirstPersonLowerBodyMesh->SetLeaderPoseComponent(BaseMesh);
+        HideBonesByNames(FirstPersonLowerBodyMesh, GetFirstPersonLowerMeshHiddenBoneNames());
+    }
+
+    TArray<USkeletalMeshComponent*> ModularMeshes =
+    {
+        HeadMesh,
+        HairMesh,
+        TopMesh,
+        PantsMesh,
+        ShoesMesh,
+        HandMesh
+    };
+
+    for (USkeletalMeshComponent* ModularMesh : ModularMeshes)
+    {
+        if (!ModularMesh)
+        {
+            continue;
+        }
+
+        ModularMesh->SetOnlyOwnerSee(false);
+        ModularMesh->SetOwnerNoSee(false); 
+        ModularMesh->SetHiddenInGame(false);
+        ModularMesh->SetLeaderPoseComponent(BaseMesh);
+        ModularMesh->SetRelativeLocation(FVector::ZeroVector);
+        ModularMesh->SetRelativeRotation(FRotator::ZeroRotator);
+        ModularMesh->SetRelativeScale3D(FVector::OneVector);
+    }
+}
+
+void AWomenCharacter::RebuildModularMeshes()
+{
+    RefreshModularMeshes();
+}
+
+void AWomenCharacter::ShowHeldItemThirdPersonDebugMesh(APickupActor* PickupActor)
+{
+    if (!ThirdPersonHeldItemDebugMesh || !PickupActor || !GetMesh())
+    {
+        return;
+    }
+
+    UStaticMeshComponent* PickupMeshComponent = PickupActor->GetPickupMeshComponent();
+    if (!PickupMeshComponent)
+    {
+        HideHeldItemThirdPersonDebugMesh();
+        return;
+    }
+
+    ThirdPersonHeldItemDebugMesh->SetStaticMesh(PickupMeshComponent->GetStaticMesh());
+    ThirdPersonHeldItemDebugMesh->EmptyOverrideMaterials();
+
+    const int32 MaterialCount = PickupMeshComponent->GetNumMaterials();
+    for (int32 MaterialIndex = 0; MaterialIndex < MaterialCount; ++MaterialIndex)
+    {
+        ThirdPersonHeldItemDebugMesh->SetMaterial(MaterialIndex, PickupMeshComponent->GetMaterial(MaterialIndex));
+    }
+
+    ThirdPersonHeldItemDebugMesh->AttachToComponent(
+        GetMesh(),
+        FAttachmentTransformRules::SnapToTargetNotIncludingScale,
+        PickupActor->GetThirdPersonSocketName());
+    ThirdPersonHeldItemDebugMesh->SetRelativeLocation(PickupActor->GetThirdPersonLocationOffset());
+    ThirdPersonHeldItemDebugMesh->SetRelativeRotation(PickupActor->GetThirdPersonRotationOffset());
+    ThirdPersonHeldItemDebugMesh->SetRelativeScale3D(PickupMeshComponent->GetRelativeScale3D());
+    ThirdPersonHeldItemDebugMesh->SetHiddenInGame(false);
+}
+
+void AWomenCharacter::HideHeldItemThirdPersonDebugMesh()
+{
+    if (!ThirdPersonHeldItemDebugMesh)
+    {
+        return;
+    }
+
+    ThirdPersonHeldItemDebugMesh->SetStaticMesh(nullptr);
+    ThirdPersonHeldItemDebugMesh->EmptyOverrideMaterials();
+    ThirdPersonHeldItemDebugMesh->SetHiddenInGame(true);
+}
+
