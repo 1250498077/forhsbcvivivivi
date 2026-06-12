@@ -27,6 +27,7 @@ protected:
     float EvaluateAnimationAlpha(float NormalizedAlpha) const;
     FTransform GetClosedDoorTransform() const;
     FTransform GetOpenedDoorTransform() const;
+    USceneComponent* GetDoorMotionComponentForCapture();
 
     // --- Components ---
 

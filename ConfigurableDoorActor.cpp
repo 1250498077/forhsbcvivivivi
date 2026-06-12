@@ -4,6 +4,13 @@
 #include "Components/StaticMeshComponent.h"
 #include "Curves/CurveFloat.h"
 
+#include "Engine/Engine.h"
+#if WITH_EDITOR
+#include "Engine/BlueprintGeneratedClass.h"
+#include "Engine/InheritableComponentHandler.h"
+#endif
+
+
 AConfigurableDoorActor::AConfigurableDoorActor()
 {
     PrimaryActorTick.bCanEverTick = true;
@@ -134,6 +141,31 @@ FTransform AConfigurableDoorActor::GetOpenedDoorTransform() const
     return FTransform(OpenRelativeRotation, OpenRelativeLocation);
 }
 
+USceneComponent* AConfigurableDoorActor::GetDoorMotionComponentForCapture()
+{
+#if WITH_EDITOR
+    if (UBlueprintGeneratedClass* BlueprintGeneratedClass = 
+            const_cast<UBlueprintGeneratedClass*>(Cast<UBlueprintGeneratedClass>(GetClass())))
+    {
+        if (UInheritableComponentHandler* ComponentHandler = 
+                BlueprintGeneratedClass->GetInheritableComponentHandler(false))
+        {
+            const FComponentKey ComponentKey = ComponentHandler->FindKey(DoorMotionRootComponent);
+            if (ComponentKey.IsValid())
+            {
+                if (USceneComponent* ComponentTemplate = 
+                        Cast<USceneComponent>(ComponentHandler->GetOverridenComponentTemplate(ComponentKey)))
+                {
+                    return ComponentTemplate;
+                }
+            }
+        }
+    }
+#endif
+
+    return DoorMotionRootComponent;
+}
+
 void AConfigurableDoorActor::OpenDoor()
 {
     SetDoorOpenState(true, false);
@@ -167,40 +199,72 @@ void AConfigurableDoorActor::SetDoorOpenState(bool bNewOpenState, bool bInstant)
 
 void AConfigurableDoorActor::CaptureCurrentAsClosedState()
 {
-    if (!DoorMotionRootComponent)
+    USceneComponent* ComponentToCapture = GetDoorMotionComponentForCapture();
+    if (!ComponentToCapture)
     {
         return;
     }
-    #if WITH_EDITOR
-        Modify();
-    #endif
-    ClosedRelativeLocation = DoorMotionRootComponent->GetRelativeLocation();
-    ClosedRelativeRotation = DoorMotionRootComponent->GetRelativeRotation();
+#if WITH_EDITOR
+    Modify();
+    ComponentToCapture->Modify();
+#endif
 
-    #if WITH_EDITOR
-        MarkPackageDirty();
-        PostEditChange();
-    #endif
+    ClosedRelativeLocation = ComponentToCapture->GetRelativeLocation();
+    ClosedRelativeRotation = ComponentToCapture->GetRelativeRotation();
+
+
+#if WITH_EDITOR
+    MarkPackageDirty();
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(
+            -1,
+            4.f,
+            FColor::Green,
+            FString::Printf(TEXT("Captured Closed: Location=%s Rotation=%s"), *ClosedRelativeLocation.ToString(), *ClosedRelativeRotation.ToString()));
+    }
+
+    UE_LOG(LogTemp, Display, TEXT("Captured Closed Door State: Location=%s Rotation=%s"), *ClosedRelativeLocation.ToString(), *ClosedRelativeRotation.ToString());
+    FProperty* ChangedProperty = FindFProperty<FProperty>(GetClass(), GET_MEMBER_NAME_CHECKED(AConfigurableDoorActor, ClosedRelativeLocation));
+    FPropertyChangedEvent PropertyChangedEvent(ChangedProperty, EPropertyChangeType::ValueSet);
+    PostEditChangeProperty(PropertyChangedEvent);
+#endif
 }
 
 void AConfigurableDoorActor::CaptureCurrentAsOpenState()
 {
-    if (!DoorMotionRootComponent)
+    USceneComponent* ComponentToCapture = GetDoorMotionComponentForCapture();
+    if (!ComponentToCapture)
     {
         return;
     }
 
-    #if WITH_EDITOR
-        Modify();
-    #endif
+#if WITH_EDITOR
+    Modify();
+    ComponentToCapture->Modify();
+#endif
+    OpenRelativeLocation = ComponentToCapture->GetRelativeLocation();
+    OpenRelativeRotation = ComponentToCapture->GetRelativeRotation();
 
-    OpenRelativeLocation = DoorMotionRootComponent->GetRelativeLocation();
-    OpenRelativeRotation = DoorMotionRootComponent->GetRelativeRotation();
 
-    #if WITH_EDITOR
-        MarkPackageDirty();
-        PostEditChange();
-    #endif
+#if WITH_EDITOR
+    MarkPackageDirty();
+
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(
+            -1,
+            4.f,
+            FColor::Green,
+            FString::Printf(TEXT("Captured Open: Location=%s Rotation=%s"), *OpenRelativeLocation.ToString(), *OpenRelativeRotation.ToString()));
+    }
+
+    UE_LOG(LogTemp, Display, TEXT("Captured Open Door State: Location=%s Rotation=%s"), *OpenRelativeLocation.ToString(), *OpenRelativeRotation.ToString());
+    FProperty* ChangedProperty = FindFProperty<FProperty>(GetClass(), GET_MEMBER_NAME_CHECKED(AConfigurableDoorActor, OpenRelativeLocation));
+    FPropertyChangedEvent PropertyChangedEvent(ChangedProperty, EPropertyChangeType::ValueSet);
+    PostEditChangeProperty(PropertyChangedEvent);
+#endif
+
 }
 
 void AConfigurableDoorActor::PreviewClosedState()
