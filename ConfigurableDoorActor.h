@@ -5,6 +5,7 @@
 #include "ConfigurableDoorActor.generated.h"
 
 class UCurveFloat;
+class UArrowComponent;
 class USceneComponent;
 class UStaticMeshComponent;
 
@@ -27,8 +28,6 @@ protected:
     float EvaluateAnimationAlpha(float NormalizedAlpha) const;
     FTransform GetClosedDoorTransform() const;
     FTransform GetOpenedDoorTransform() const;
-    USceneComponent* GetDoorMotionComponentForCapture();
-
     // --- Components ---
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
@@ -46,18 +45,11 @@ protected:
     TObjectPtr<UStaticMeshComponent> DoorMeshComponent;
 
     // --- Door | Transform ---
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Door|Transform")
+    TObjectPtr<UArrowComponent> ClosedStateTransformComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Door|Transform")
-    FVector ClosedRelativeLocation = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Door|Transform")
-    FRotator ClosedRelativeRotation = FRotator::ZeroRotator;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Door|Transform")
-    FVector OpenRelativeLocation = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Door|Transform")
-    FRotator OpenRelativeRotation = FRotator(0.f, 90.f, 0.f);
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Door|Transform")
+    TObjectPtr<UArrowComponent> OpenStateTransformComponent;
 
     // --- Door | Animation ---
 
