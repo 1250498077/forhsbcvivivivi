@@ -2,6 +2,7 @@
 
 #include "Animation/AnimMontage.h"
 #include "Animation/AnimSequenceBase.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/Pawn.h"
 #include "Kismet/KismetMathLibrary.h"
 #include "MyPlayerController.h"
@@ -27,7 +28,9 @@ void UWomenNativeAnimInstance::NativeInitializeAnimation()
     bWasSquat = false;
     bPendingCrouchEnter = false;
     bPendingCrouchExit = false;
+    bHasMovementInput = false;
     JumpStartTimeRemaining = 0.f;
+    FirstPersonHeldMovingTime = 0.f;
     SmoothedLookRotation = FRotator::ZeroRotator;
     bAnimationTransitionLocked = false;
     AnimationLockTimeRemaining = 0.f;
@@ -36,6 +39,9 @@ void UWomenNativeAnimInstance::NativeInitializeAnimation()
     ActiveThrowDynamicMontage = nullptr;
     bThrowUsesLoopingUpperBodySequence = false;
     bThrowUsesFullBodySlot = false;
+    Spine2LookRotation = FRotator::ZeroRotator;
+    NeckLookRotation = FRotator::ZeroRotator;
+    HeadLookRotation = FRotator::ZeroRotator;
 
     // 默认策略示例：
     // Idle / Walk / Run / FallLoop / Crouch 动作都是循环状态，必须可以随时被打断。
@@ -74,7 +80,7 @@ void UWomenNativeAnimInstance::InitializeDefaultLookBoneRotations()
         TEXT("Head")
     };
 
-    const float PitchWeights[] = { 0.75f, 0.15f, 0.1f };
+    const float PitchWeights[] = { 1.0f, 1.0f, 1.0f };
 
     for (int32 Index = 0; Index < LookBoneNames.Num(); ++Index)
     {
@@ -105,12 +111,21 @@ void UWomenNativeAnimInstance::NativeUpdateAnimation(float DeltaTime)
     APawn* Pawn = TryGetPawnOwner();
     if (!Pawn) return;
     Speed = Pawn->GetVelocity().Size2D();
+    bHasMovementInput = false;
+    if (const AWomenCharacter* WomenCharacter = Cast<AWomenCharacter>(Pawn))
+    {
+        if (const UCharacterMovementComponent* MovementComponent = WomenCharacter->GetCharacterMovement())
+        {
+            // 判断是否有移动输入（通过加速度大小的平方是否大于极小值来判断）
+            bHasMovementInput = MovementComponent->GetCurrentAcceleration().SizeSquared2D() > KINDA_SMALL_NUMBER;
+        }
+    }
 
     UpdateOneShotActionLock(DeltaTime);
     UpdateNativeLookBoneRotations(DeltaTime);
-    UpdateLocomotionState(DeltaTime);
     UpdateHoldTypeFromOwner();
     HandleHoldTypeChanged();
+    UpdateLocomotionState(DeltaTime);
     HandleThrowMontageState();
 }
 
@@ -137,7 +152,15 @@ void UWomenNativeAnimInstance::UpdateNativeLookBoneRotations(float DeltaTime)
     
     if (!bEnableNativeLookBoneCalculation)
     {
+        Spine2LookRotation = FRotator::ZeroRotator;
+        NeckLookRotation = FRotator::ZeroRotator;
+        HeadLookRotation = FRotator::ZeroRotator;
         return;
+    }
+
+    if (LookBoneRotations.Num() == 0)
+    {
+        InitializeDefaultLookBoneRotations();
     }
 
     const FRotator TargetLookRotation = CalculateControlRotationDelta();
@@ -158,12 +181,17 @@ void UWomenNativeAnimInstance::UpdateNativeLookBoneRotations(float DeltaTime)
     Yaw = SmoothedLookRotation.Yaw;
     Roll = SmoothedLookRotation.Roll;
 
+    Spine2LookRotation = FRotator(0.f, 0.f, SmoothedLookRotation.Pitch * -1.0f);
+    NeckLookRotation = FRotator(0.f, 0.f, SmoothedLookRotation.Pitch * -0.15f);
+    HeadLookRotation = FRotator(0.f, 0.f, SmoothedLookRotation.Pitch * -0.1f);
+
     for (FNativeLookBoneRotation& LookBoneRotation : LookBoneRotations)
     {
         LookBoneRotation.ComputedRotation = FRotator{
-            SmoothedLookRotation.Pitch * LookBoneRotation.PitchWeight,
+            0.f,
             SmoothedLookRotation.Yaw * LookBoneRotation.YawWeight,
-            SmoothedLookRotation.Roll * LookBoneRotation.RollWeight
+            SmoothedLookRotation.Pitch * -LookBoneRotation.PitchWeight
+            + SmoothedLookRotation.Roll * LookBoneRotation.RollWeight
         };
     }
 }
@@ -214,18 +242,30 @@ void UWomenNativeAnimInstance::UpdateLocomotionState(float DeltaTime)
     // 这两个过渡动作默认进入 CrouchIdle/Idle 等结果状态。
     if (bIsSquat && !bWasSquat)
     {
-        bPendingCrouchEnter = true;
+        bPendingCrouchEnter = HasPlayableLocomotionAnimation(EWomenNativeLocomotionState::CrouchEnter);
         bPendingCrouchExit = false;
     }
     else if (!bIsSquat && bWasSquat)
     {
-        bPendingCrouchExit = true;
+        bPendingCrouchExit = HasPlayableLocomotionAnimation(EWomenNativeLocomotionState::CrouchExit);
         bPendingCrouchEnter = false;
     }
 
     if (JumpStartTimeRemaining > 0.f)
     {
         JumpStartTimeRemaining = FMath::Max(0.f, JumpStartTimeRemaining - DeltaTime);
+    }
+
+    const bool bFirstPersonHoldingItem = IsFirstPersonAnimationInstance()
+    && (CurrentHeldActor || CurrentHoldType != EHoldItemType::None);
+
+    if (bFirstPersonHoldingItem && bHasMovementInput && Speed > MoveSpeedThreshold)
+    {
+        FirstPersonHeldMovingTime += DeltaTime;
+    }
+    else
+    {
+        FirstPersonHeldMovingTime = 0.f;
     }
 
     CurrentLocomotionState = ResolveLocomotionState();
@@ -254,13 +294,25 @@ EWomenNativeLocomotionState UWomenNativeAnimInstance::ResolveLocomotionState() c
         return EWomenNativeLocomotionState::CrouchExit;
     }
 
-    const bool bMoving = Speed > MoveSpeedThreshold;
+    bool bMoving = Speed > MoveSpeedThreshold;
+    const bool bFirstPersonHoldingItem = IsFirstPersonAnimationInstance()
+        && (CurrentHeldActor || CurrentHoldType != EHoldItemType::None);
+    if (bMoving && bFirstPersonHoldingItem && (!bHasMovementInput || FirstPersonHeldMovingTime < FirstPersonHeldMovementStartDelay))
+    {
+        bMoving = false;
+    }
 
     if (bIsSquat)
     {
-        return bMoving
-            ? EWomenNativeLocomotionState::CrouchWalk
-            : EWomenNativeLocomotionState::CrouchIdle;
+        if (bMoving && HasPlayableLocomotionAnimation(EWomenNativeLocomotionState::CrouchWalk))
+        {
+            return EWomenNativeLocomotionState::CrouchWalk;
+        }
+
+        if (!bMoving && HasPlayableLocomotionAnimation(EWomenNativeLocomotionState::CrouchIdle))
+        {
+            return EWomenNativeLocomotionState::CrouchIdle;
+        }
     }
 
     if (!bMoving)
@@ -276,6 +328,11 @@ EWomenNativeLocomotionState UWomenNativeAnimInstance::ResolveLocomotionState() c
 void UWomenNativeAnimInstance::HandleLocomotionStateChanged()
 {
     if (CurrentLocomotionState == PreviousLocomotionState)
+    {
+        return;
+    }
+
+    if (IsFirstPersonAnimationInstance() && (bIsStandThrowing || bIsSquatThrowing))
     {
         return;
     }
@@ -308,6 +365,17 @@ const FNativeLocomotionAnimationSet* UWomenNativeAnimInstance::GetAnimationSetFo
         case EWomenNativeLocomotionState::CrouchWalk: return &CrouchWalkAnimation;
         default: return nullptr;
     }
+}
+
+bool UWomenNativeAnimInstance::HasPlayableLocomotionAnimation(EWomenNativeLocomotionState LocomotionState) const
+{
+    if (GetHeldLocomotionAnimation(LocomotionState))
+    {
+        return true;
+    }
+
+    const FNativeLocomotionAnimationSet* AnimationSet = GetAnimationSetForLocomotionState(LocomotionState);
+    return AnimationSet && AnimationSet->Animation;
 }
 
 bool UWomenNativeAnimInstance::PlayLocomotionAnimation(EWomenNativeLocomotionState LocomotionState)
@@ -443,23 +511,52 @@ bool UWomenNativeAnimInstance::IsFirstPersonAnimationInstance() const
 UAnimSequenceBase* UWomenNativeAnimInstance::GetHeldLocomotionAnimation(EWomenNativeLocomotionState LocomotionState) const
 {
     const FPickupHeldAnimationSet* HeldAnimationSet = GetCurrentHeldAnimationSet();
-    if (!HeldAnimationSet)
+    
+    const bool bHasHoldType = CurrentHoldType != EHoldItemType::None;
+    const FNativeHoldAnimationSet* HoldAnimationSet = bHasHoldType ? HoldAnimations.Find(CurrentHoldType) : nullptr;
+    UAnimSequenceBase* HeldIdlePose = nullptr;
+
+    // 尝试获取 IdlePose
+    if (HeldAnimationSet && HeldAnimationSet->IdlePose)
     {
-        return nullptr;
+        HeldIdlePose = HeldAnimationSet->IdlePose.Get();
     }
+    else if (HoldAnimationSet && HoldAnimationSet->IdlePose)
+    {
+        HeldIdlePose = HoldAnimationSet->IdlePose.Get();
+    }
+
+    const bool bFirstPersonHoldingItem = IsFirstPersonAnimationInstance() 
+        && (CurrentHeldActor || bHasHoldType);
 
     switch (LocomotionState)
     {
         case EWomenNativeLocomotionState::Idle:
-            return HeldAnimationSet->IdlePose.Get();
+            return HeldIdlePose;
         case EWomenNativeLocomotionState::Walk:
-            return HeldAnimationSet->WalkAnimation.Get();
+            if (HeldAnimationSet && HeldAnimationSet->WalkAnimation)
+            {
+                return HeldAnimationSet->WalkAnimation.Get();
+            }
+            return bFirstPersonHoldingItem ? HeldIdlePose : nullptr;
         case EWomenNativeLocomotionState::Run:
-            return HeldAnimationSet->RunAnimation.Get();
+            if (HeldAnimationSet && HeldAnimationSet->RunAnimation)
+            {
+                return HeldAnimationSet->RunAnimation.Get();
+            }
+            return bFirstPersonHoldingItem ? HeldIdlePose : nullptr;
         case EWomenNativeLocomotionState::CrouchIdle:
-            return HeldAnimationSet->CrouchIdleAnimation.Get();
+            if (HeldAnimationSet && HeldAnimationSet->CrouchIdleAnimation)
+            {
+                return HeldAnimationSet->CrouchIdleAnimation.Get();
+            }
+            return HeldIdlePose;
         case EWomenNativeLocomotionState::CrouchWalk:
-            return HeldAnimationSet->CrouchWalkAnimation.Get();
+            if (HeldAnimationSet && HeldAnimationSet->CrouchWalkAnimation)
+            {
+                return HeldAnimationSet->CrouchWalkAnimation.Get();
+            }
+            return bFirstPersonHoldingItem ? HeldIdlePose : nullptr;
         default:
             return nullptr;
     }
@@ -582,7 +679,8 @@ bool UWomenNativeAnimInstance::PlayThrowAction(bool bSquatThrow)
 
     if (UpperBodyAnimation)
     {
-        if (bUseFullBodySlotForThrow && !LocomotionSlotName.IsNone())
+        const bool bCanUseFullBodyThrowSlot = bUseFullBodySlotForThrow || IsFirstPersonAnimationInstance();
+        if (bCanUseFullBodyThrowSlot && !LocomotionSlotName.IsNone())
         {
             ActiveThrowDynamicMontage = PlaySlotAnimationAsDynamicMontage(
                 UpperBodyAnimation,
