@@ -13,6 +13,7 @@
 #include "ExorcismSubsystem.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
+#include "GhostCharacter.h"
 #include "NavigationSystem.h"
 #include "NavigationPath.h"
 #include "Navigation/PathFollowingComponent.h"
@@ -432,6 +433,26 @@ void AMyAIController::Tick(float DeltaTime)
 
     // 鬼的显隐完全由控制器维护：默认半透明，被手电命中后短暂恢复正常不透明。
     UpdateGhostVisualState(DeltaTime);
+
+    
+    if (const AGhostCharacter* GhostPawn = Cast<AGhostCharacter>(GetPawn()))
+    {
+        if (GhostPawn->bStopAIMovementDuringSoulSuck && GhostPawn->bIsSoulSucking)
+        {
+            StopMovement();
+            ActiveMoveRequestId = FAIRequestID::InvalidRequest;
+            bIsMoving = false;
+            return;
+        }
+
+        if (GhostPawn->bStopAIMovementDuringTelekineticThrow && GhostPawn->bIsTelekineticThrowActive)
+        {
+            StopMovement();
+            ActiveMoveRequestId = FAIRequestID::InvalidRequest;
+            bIsMoving = false;
+            return;
+        }
+    }
 
     // DeltaTime = “这一帧经过了多少秒”。
     // UE 每帧都会把这个值传进来，所有倒计时、速度平滑和状态推进都依赖它，
@@ -1062,6 +1083,24 @@ bool AMyAIController::ConsumeFearShouldRepath()
 bool AMyAIController::IsFearActive() const
 {
     return bFearActive;
+}
+
+bool AMyAIController::TryGetTrackedPlayerLocation(FVector& OutLocation) const
+{
+    if (bCanSeePlayer && IsValid(TargetPlayer))
+    {
+        OutLocation = TargetPlayer->GetActorLocation();
+        return true;
+    }
+
+    if (bHasLastSeenPlayerData)
+    {
+        OutLocation = LastSeenPlayerLocation;
+        return true;
+    }
+
+    OutLocation = FVector::ZeroVector;
+    return false;
 }
 
 FVector AMyAIController::GetFearSourceLocation() const

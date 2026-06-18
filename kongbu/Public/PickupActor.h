@@ -4,12 +4,14 @@
 #include "GameFramework/Actor.h"
 #include "PickupActor.generated.h"
 
+
 class USceneComponent;
 class UStaticMeshComponent;
 class FLifetimeProperty;
 class UPhysicalMaterial;
 class UAnimMontage;
 class UAnimSequenceBase;
+class UPrimitiveComponent;
 
 UENUM(BlueprintType)
 enum class EHoldItemType : uint8
@@ -95,10 +97,15 @@ public:
 protected:
     virtual void BeginPlay() override;
     virtual void OnConstruction(const FTransform& Transform) override;
+    bool TryInterruptGhostsSoulSuckOnHit(AActor* otherActor, const FHitResult& Hit, const FVector& NormalImpulse);
 
     // 物体本体网格。拾取、放下和投掷都会围绕它切换物理与碰撞状态。
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     UStaticMeshComponent* MeshComponent;
+
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pickup|Ghost")
+    bool bCanInterruptGhostsSoulSuckOnHit = true;
 
     // 需要多个外观部件时，把额外 StaticMeshComponent 挂到这个节点下面。
     // 基类会统一把这些附加网格限制为“只显示，不参与物理和碰撞”。
@@ -158,6 +165,14 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Pickup|Hold")
     EHoldItemType HoldType = EHoldItemType::None;
 
+    // 手持这个道具时是否允许玩家冲刺。需要限制特定道具时，在对应道具蓝图里关闭即可。
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Pickup|Hold|Restrictions")
+    bool bAllowSprintWhileHeld = true;
+
+    // 手持这个道具时是否允许玩家投掷。需要限制特定道具时，在对应道具蓝图里关闭即可。
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Pickup|Hold|Restrictions")
+    bool bAllowThrowWhileHeld = true;
+
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Pickup|Held Animation|First Person")
     FPickupHeldAnimationSet FirstPersonHeldAnimationSet;
 
@@ -192,6 +207,14 @@ protected:
     // 开启后，具体怎么失效由各个子类自己实现。
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pickup|Disable")
     bool bCanBeDisabledByRage = true;
+
+    // 只有开启的道具，投掷命中“正在吸食人类”的鬼时，才允许打断吸食。
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pickup|Ghost Interrupt")
+    bool bCanInterruptGhostSoulSuckOnHit = false;
+
+    // 打断吸食后，鬼额外进入多久的倒地/眩晕恢复窗口。
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pickup|Ghost Interrupt", meta = (ClampMin = "0.0"))
+    float GhostSoulSuckInterruptStunDuration = 1.25f;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Replicated, Category = "Pickup|Disable")
     bool bDisabledByRage = false;
@@ -253,6 +276,29 @@ public:
         return bIsHeldByPlayer;
     }
 
+    UFUNCTION(BlueprintPure, Category = "Pickup|Hold|Restrictions")
+    bool AllowsSprintWhileHeld() const
+    {
+        return bAllowSprintWhileHeld;
+    }
+
+    UFUNCTION(BlueprintPure, Category = "Pickup|Hold|Restrictions")
+    bool AllowsThrowWhileHeld() const
+    {
+        return bAllowThrowWhileHeld;
+    }
+
+    UFUNCTION(BlueprintPure, Category = "Pickup|Ghost Interrupt")
+    bool CanInterruptGhostSoulSuckOnHit() const
+    {
+        return bCanInterruptGhostSoulSuckOnHit;
+    }
+
+    UFUNCTION(BlueprintPure, Category = "Pickup|Ghost Interrupt")
+    float GetGhostSoulSuckInterruptStunDuration() const
+    {
+        return GhostSoulSuckInterruptStunDuration;
+    }
 
     UFUNCTION(BlueprintPure, Category = "Pickup|Hold")
     EHoldItemType GetHoldType() const
@@ -365,4 +411,15 @@ public:
     bool CanBeDisabledByRageNative() const;
     void DisableByRageNative(AActor* DisablingActor);
     void RestoreAfterRageDisableNative();
+
+private:
+    UFUNCTION()
+    void HandlePickupMeshHit(
+        UPrimitiveComponent* HitComponent,
+        AActor* OtherActor,
+        UPrimitiveComponent* OtherComp,
+        FVector NormalImpulse,
+        const FHitResult& Hit);
+
+    bool TryInterruptGhostSoulSuckOnHit(AActor* OtherActor, const FHitResult& Hit, const FVector& NormalImpulse);
 };

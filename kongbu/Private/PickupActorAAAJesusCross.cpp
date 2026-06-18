@@ -10,6 +10,7 @@
 #include "Engine/StaticMesh.h"
 #include "EngineUtils.h"
 #include "GameFramework/Pawn.h"
+#include "GhostThrowablePropComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "MyAIController.h"
@@ -381,6 +382,8 @@ APickupActorAAAJesusCross::APickupActorAAAJesusCross()
     // 这样鬼在显形恢复实体碰撞后，靠近十字架时就能把它顶倒；
     // 隐身时鬼对 PhysicsBody 仍是 Overlap，所以不会在平时把十字架乱顶走。
     bAllowPawnCollision = true;
+    bCanInterruptGhostSoulSuckOnHit = true;
+    GhostSoulSuckInterruptStunDuration = 1.35f;
     ApplyReleasedCollisionProfile();
 
     CrossLinkRootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("CrossLinkRootComponent"));

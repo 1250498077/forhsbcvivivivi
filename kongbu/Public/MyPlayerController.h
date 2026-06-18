@@ -140,6 +140,10 @@ protected:
     UPROPERTY(EditAnywhere, Category = "Movement")
     float WalkSpeed = 200.f;
 
+    // 下蹲时的目标移动速度。
+    UPROPERTY(EditAnywhere, Category = "Movement")
+    float CrouchSpeed = 120.f;
+
     // 冲刺目标速度。
     UPROPERTY(EditAnywhere, Category = "Movement")
     float RunSpeed = 400.f;
@@ -177,6 +181,8 @@ protected:
     bool CanInteractWithPickupActor(const APickupActor* PickupActor) const;
     bool AttachHeldActorToFirstPersonView(APickupActor* PickupActor);
     bool AttachHeldActorToThirdPersonView(APickupActor* PickupActor);
+    bool CanSprintWithHeldActor() const;
+    bool CanThrowHeldActor() const;
     bool IsThrowStateActive(const AWomenCharacter* MyChar) const;
     void ApplySprintAnimationState(AWomenCharacter* MyChar);
     void StartThrowAnimationState(AWomenCharacter* MyChar) const;

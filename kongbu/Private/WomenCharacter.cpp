@@ -5,8 +5,10 @@
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SceneComponent.h"
-#include "Components/StaticMeshComponent.h"
+#include "Components/staticMeshComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Net/UnrealNetwork.h"
+#include "WomenNativeAnimInstance.h"
 
 namespace
 {
@@ -300,6 +302,7 @@ void AWomenCharacter::OnConstruction(const FTransform& Transform)
 void AWomenCharacter::BeginPlay()
 {
     Super::BeginPlay();
+    ThirdPersonMeshBaseRelativeRotation = GetMesh() ? GetMesh()->GetRelativeRotation() : FRotator::ZeroRotator;
     RefreshModularMeshes();
 }
 
@@ -352,10 +355,77 @@ void AWomenCharacter::Tick(float DeltaTime)
     FirstPersonCameraRoot->SetRelativeLocation(CameraRelativeLocation);
     FirstPersonCameraRoot->SetRelativeRotation(FirstPersonCameraRotationOffset);
 
+    UpdateThirdPersonDiagonalYaw(DeltaTime);
+
 #if WITH_EDITOR || UE_BUILD_DEVELOPMENT
     Debug_TickOffsetTuning();
 #endif
 }
+
+
+void AWomenCharacter::UpdateThirdPersonDiagonalYaw(float DeltaTime)
+{
+    USkeletalMeshComponent* ThirdPersonMesh = GetMesh();
+    if (!ThirdPersonMesh)
+    {
+        return;
+    }
+
+    float TargetYaw = 0.f;
+
+    if (bEnableThirdPersonDiagonalYaw)
+    {
+        const FVector LocalVelocity = GetActorTransform().InverseTransformVectorNoScale(GetVelocity());
+        const float ForwardSpeed = LocalVelocity.X;
+        const float RightSpeed = LocalVelocity.Y;
+
+        if (ForwardSpeed > ThirdPersonDiagonalYawMinForwardSpeed && FMath::Abs(RightSpeed) > ThirdPersonDiagonalYawMinForwardSpeed)
+        {
+            TargetYaw = RightSpeed > 0.f ? ThirdPersonDiagonalYawAngle : -ThirdPersonDiagonalYawAngle;
+        }
+    }
+
+    if (ThirdPersonDiagonalYawInterpSpeed <= 0.f)
+    {
+        SmoothedThirdPersonDiagonalYaw = TargetYaw;
+    }
+    else
+    {
+        SmoothedThirdPersonDiagonalYaw = FMath::FInterpTo(
+            SmoothedThirdPersonDiagonalYaw,
+            TargetYaw,
+            DeltaTime,
+            ThirdPersonDiagonalYawInterpSpeed);
+    }
+
+    FRotator TargetRelativeRotation = ThirdPersonMeshBaseRelativeRotation;
+    TargetRelativeRotation.Yaw += SmoothedThirdPersonDiagonalYaw;
+    ThirdPersonMesh->SetRelativeRotation(TargetRelativeRotation);
+
+    for (USkeletalMeshComponent* ModularMesh : GetThirdPersonModularMeshes())
+    {
+        if (!ModularMesh || ModularMesh->GetAttachParent() == ThirdPersonMesh)
+        {
+            continue;
+        }
+
+        ModularMesh->SetRelativeRotation(TargetRelativeRotation);
+    }
+}
+
+TArray<USkeletalMeshComponent*> AWomenCharacter::GetThirdPersonModularMeshes() const
+{
+    return
+    {
+        HeadMesh,
+        HairMesh,
+        TopMesh,
+        PantsMesh,
+        ShoesMesh,
+        HandMesh
+    };
+}
+
 
 #if WITH_EDITOR || UE_BUILD_DEVELOPMENT
 void AWomenCharacter::Debug_TickOffsetTuning()
@@ -440,8 +510,104 @@ void AWomenCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
     DOREPLIFETIME(AWomenCharacter, IsSquatThrowing);
     DOREPLIFETIME(AWomenCharacter, IsStandThrowing);
     DOREPLIFETIME(AWomenCharacter, IsMiddleHandleTime);
+    DOREPLIFETIME(AWomenCharacter, bIsSoulSucked);
+    DOREPLIFETIME(AWomenCharacter, bIsKnockedDown);
+}
+void AWomenCharacter::StartSoulSuckReaction()
+{
+    GetWorldTimerManager().ClearTimer(ForcedReactionTimerHandle);
+
+    bIsSoulSucked = true;
+    bIsKnockedDown = false;
+    IsMiddleHandleTime = false;
+    IsSquatThrowing = false;
+    IsStandThrowing = false;
+    IsSprint = false;
+
+    if (UCharacterMovementComponent* MovementComponent = GetCharacterMovement())
+    {
+        MovementComponent->StopMovementImmediately();
+        MovementComponent->DisableMovement();
+    }
+
+    MulticastPlaySoulSuckReactionAnimation();
+}
+void AWomenCharacter::InterruptSoulSuckWithKnockdown(float KnockdownDuration)
+{
+    GetWorldTimerManager().ClearTimer(ForcedReactionTimerHandle);
+
+    bIsSoulSucked = false;
+    bIsKnockedDown = true;
+    IsMiddleHandleTime = false;
+    IsSquatThrowing = false;
+    IsStandThrowing = false;
+    IsSprint = false;
+
+    if (UCharacterMovementComponent* MovementComponent = GetCharacterMovement())
+    {
+        MovementComponent->StopMovementImmediately();
+        MovementComponent->DisableMovement();
+    }
+
+    MulticastPlayKnockdownReactionAnimation();
+
+    const float ResolvedDuration = KnockdownDuration > 0.f ? KnockdownDuration : ResolveKnockdownReactionDuration();
+    if (ResolvedDuration > 0.f)
+    {
+        GetWorldTimerManager().SetTimer(ForcedReactionTimerHandle, this, &AWomenCharacter::ClearForcedReactionState, ResolvedDuration, false);
+    }
+    else
+    {
+        ClearForcedReactionState();
+    }
+}
+void AWomenCharacter::ClearForcedReactionState()
+{
+    GetWorldTimerManager().ClearTimer(ForcedReactionTimerHandle);
+    bIsSoulSucked = false;
+    bIsKnockedDown = false;
+
+    if (UCharacterMovementComponent* MovementComponent = GetCharacterMovement())
+    {
+        MovementComponent->SetMovementMode(MOVE_Walking);
+    }
 }
 
+void AWomenCharacter::MulticastPlaySoulSuckReactionAnimation_Implementation()
+{
+    if (UWomenNativeAnimInstance* AnimInstance = ResolveWomenNativeAnimInstance())
+    {
+        AnimInstance->PlaySoulSuckedAction();
+    }
+}
+
+void AWomenCharacter::MulticastPlayKnockdownReactionAnimation_Implementation()
+{
+    if (UWomenNativeAnimInstance* AnimInstance = ResolveWomenNativeAnimInstance())
+    {
+        AnimInstance->PlayKnockdownAction();
+    }
+}
+
+UWomenNativeAnimInstance* AWomenCharacter::ResolveWomenNativeAnimInstance() const
+{
+    if (!GetMesh())
+    {
+        return nullptr;
+    }
+
+    return Cast<UWomenNativeAnimInstance>(GetMesh()->GetAnimInstance());
+}
+
+float AWomenCharacter::ResolveKnockdownReactionDuration() const
+{
+    if (const UWomenNativeAnimInstance* AnimInstance = ResolveWomenNativeAnimInstance())
+    {
+        return AnimInstance->GetKnockdownActionDuration();
+    }
+
+    return 0.f;
+}
 void AWomenCharacter::RefreshModularMeshes()
 {
     USkeletalMeshComponent* BaseMesh = GetMesh();
@@ -539,21 +705,17 @@ void AWomenCharacter::RefreshModularMeshes()
     // ------------------------------------------------------------------
     // 第三人称模块化部件（跟随主骨骼）
     // ------------------------------------------------------------------
-    TArray<USkeletalMeshComponent*> TPModularMeshes =
-    {
-        HeadMesh,
-        HairMesh,
-        TopMesh,
-        PantsMesh,
-        ShoesMesh,
-        HandMesh
-    };
 
-    for (USkeletalMeshComponent* TPMesh : TPModularMeshes)
+    for (USkeletalMeshComponent* TPMesh : GetThirdPersonModularMeshes())
     {
         if (!TPMesh)
         {
             continue;
+        }
+
+        if (TPMesh->GetAttachParent() != BaseMesh)
+        {
+            TPMesh->AttachToComponent(BaseMesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
         }
 
         TPMesh->SetOnlyOwnerSee(false);

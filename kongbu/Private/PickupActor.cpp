@@ -2,6 +2,7 @@
 
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "GhostCharacter.h"
 #include "Net/UnrealNetwork.h"
 
 APickupActor::APickupActor()
@@ -13,6 +14,8 @@ APickupActor::APickupActor()
     RootComponent = MeshComponent;
     MeshComponent->SetIsReplicated(true);
     MeshComponent->SetVisibleInRayTracing(true);
+    MeshComponent->SetNotifyRigidBodyCollision(true);
+    MeshComponent->OnComponentHit.AddDynamic(this, &APickupActor::HandlePickupMeshHit);
 
     VisualMeshRootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("VisualMeshRootComponent"));
     VisualMeshRootComponent->SetupAttachment(MeshComponent);
@@ -250,6 +253,65 @@ void APickupActor::OnThrown(FVector ThrowDirection, float ThrowForce)
         }
     });
 }
+
+void APickupActor::HandlePickupMeshHit(
+    UPrimitiveComponent* HitComponent,
+    AActor* OtherActor,
+    UPrimitiveComponent* OtherComp,
+    FVector NormalImpulse,
+    const FHitResult& Hit)
+{
+    (void)OtherComp;
+
+    if (HasAuthority() || !MeshComponent || HitComponent != MeshComponent)
+    {
+        return;
+    }
+
+    if (bIsHeldByPlayer || !MeshComponent->IsSimulatingPhysics())
+    {
+        return;
+    }
+
+    TryInterruptGhostsSoulSuckOnHit(OtherActor, Hit, NormalImpulse);
+}
+
+bool APickupActor::TryInterruptGhostsSoulSuckOnHit(AActor* otherActor, const FHitResult& Hit, const FVector& NormalImpulse)
+{
+    if (!bCanInterruptGhostsSoulSuckOnHit || !IsValid(otherActor))
+    {
+    return false;
+    }
+
+    AGhostCharacter* GhostCharacter = Cast<AGhostCharacter>(otherActor);
+    if (!IsValid(GhostCharacter) || !GhostCharacter->bIsSoulSucking)
+    {
+    return false;
+    }
+
+    FVector ImpactDirection = -Hit.ImpactNormal.GetSafeNormal();
+    if (ImpactDirection.IsNearlyZero() && !NormalImpulse.IsNearlyZero())
+    {
+    ImpactDirection = NormalImpulse.GetSafeNormal();
+    }
+
+    if (ImpactDirection.IsNearlyZero() && MeshComponent)
+    {
+    ImpactDirection = MeshComponent->GetPhysicsLinearVelocity().GetSafeNormal();
+    }
+
+    AActor* ImpactSourceActor = GetInstigator();
+    if (!IsValid(ImpactSourceActor))
+    {
+    ImpactSourceActor = GetOwner();
+    }
+
+    return GhostCharacter->InterruptSoulSuckWithKnockdown(
+    ImpactSourceActor,
+    ImpactDirection,
+    FMath::Max(0.f, GhostSoulSuckInterruptStunDuration));
+}
+
 
 bool APickupActor::CanBeClosedByPlayer_Implementation() const
 {

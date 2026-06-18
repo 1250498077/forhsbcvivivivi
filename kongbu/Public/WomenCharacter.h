@@ -7,6 +7,7 @@
 
 class FLifetimeProperty;
 class APickupActor;
+class UWomenNativeAnimInstance;
 
 UCLASS()
 class KONGBU_API AWomenCharacter : public ACharacter
@@ -23,8 +24,12 @@ protected:
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
     void RefreshModularMeshes();
+    TArray<class USkeletalMeshComponent*> GetThirdPersonModularMeshes() const;
     FVector CalculateFirstPersonCameraMovementOffset(float DeltaTime);
+    void UpdateThirdPersonDiagonalYaw(float DeltaTime);
     FVector SmoothedFirstPersonCameraMovementOffset = FVector::ZeroVector;
+    FRotator ThirdPersonMeshBaseRelativeRotation = FRotator::ZeroRotator;
+    float SmoothedThirdPersonDiagonalYaw = 0.f;
 
 // ===== Debug: Runtime Held Item Offset Tuning =====
 #if WITH_EDITORONLY_DATA
@@ -146,6 +151,22 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Anti Clip", meta = (ClampMin = "0.0"))
     float FirstPersonCameraMovementOffsetInterpSpeed = 8.f;
 
+    // ==========================================
+    // 第三人称方向优化
+    // ==========================================
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Third Person|Movement Direction")
+    bool bEnableThirdPersonDiagonalYaw = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Third Person|Movement Direction", meta = (ClampMin = "0.0", ClampMax = "45.0"))
+    float ThirdPersonDiagonalYawAngle = 28.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Third Person|Movement Direction", meta = (ClampMin = "0.0"))
+    float ThirdPersonDiagonalYawInterpSpeed = 8.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Third Person|Movement Direction", meta = (ClampMin = "0.0"))
+    float ThirdPersonDiagonalYawMinForwardSpeed = 20.f;
+
     // ======================================================================
     // 第一人称偏移参数
     // ======================================================================
@@ -182,6 +203,15 @@ public:
     void ShowHeldItemThirdPersonDebugMesh(APickupActor* PickupActor);
     void HideHeldItemThirdPersonDebugMesh();
 
+    UFUNCTION(BlueprintCallable, Category = "Reaction")
+    void StartSoulSuckReaction();
+
+    UFUNCTION(BlueprintCallable, Category = "Reaction")
+    void InterruptSoulSuckWithKnockdown(float KnockdownDuration = -1.f);
+
+    UFUNCTION(BlueprintCallable, Category = "Reaction")
+    void ClearForcedReactionState();
+
     // ======================================================================
     // 移动状态
     // ======================================================================
@@ -200,4 +230,23 @@ public:
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Replicated, Category = "Movement")
     bool IsMiddleHandleTime = false;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Replicated, Category = "Reaction")
+    bool bIsSoulSucked = false;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Replicated, Category = "Reaction")
+    bool bIsKnockedDown = false;
+
+protected:
+    UFUNCTION(NetMulticast, Reliable)
+    void MulticastPlaySoulSuckReactionAnimation();
+
+    UFUNCTION(NetMulticast, Reliable)
+    void MulticastPlayKnockdownReactionAnimation();
+
+private:
+    UWomenNativeAnimInstance* ResolveWomenNativeAnimInstance() const;
+    float ResolveKnockdownReactionDuration() const;
+
+    FTimerHandle ForcedReactionTimerHandle;
 };

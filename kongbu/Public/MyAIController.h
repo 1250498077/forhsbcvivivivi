@@ -162,6 +162,32 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI|Exorcism")
     int32 ExorcismGhostTypeId = INDEX_NONE;
 
+    UFUNCTION(BlueprintPure, Category = "AI|State")
+    EEnemyAIState GetCurrentAIState() const
+    {
+        return CurrentState;
+    }
+
+    UFUNCTION(BlueprintPure, Category = "AI|State")
+    bool IsCurrentAIState(EEnemyAIState State) const
+    {
+        return CurrentState == State;
+    }
+
+    UFUNCTION(BlueprintPure, Category = "AI|State")
+    bool CanCurrentlySeePlayer() const
+    {
+        return bCanSeePlayer && IsValid(TargetPlayer);
+    }
+
+    UFUNCTION(BlueprintPure, Category = "AI|State")
+    AActor* GetCurrentTargetPlayer() const
+    {
+        return TargetPlayer;
+    }
+
+    bool TryGetTrackedPlayerLocation(FVector& OutLocation) const;
+
     // 让鬼短暂进入眩晕：原地缓慢转圈、立刻丢失当前仇恨，并在结束后回到巡逻。
     UFUNCTION(BlueprintCallable, Category = "AI|Effects|Stun")
     void ApplyStun(float Duration = -1.f);

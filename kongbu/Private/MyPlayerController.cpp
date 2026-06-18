@@ -350,6 +350,15 @@ void AMyPlayerController::MoveRight(const FInputActionValue &Value)
 
 void AMyPlayerController::Jump()
 {
+    if (AWomenCharacter *MyChar = Cast<AWomenCharacter>(GetPawn()))
+    {
+        if (MyChar->IsSquat)
+        {
+            SquatTriggered();
+            return;
+        }
+    }
+    
     if (ACharacter *Char = Cast<ACharacter>(GetPawn()))
         Char->Jump();
 }
@@ -565,6 +574,7 @@ bool AMyPlayerController::TryPickupActor(APickupActor *PickupActor)
 
     // 重新拿起物体时，把 bob 计时清零，避免沿用上次的相位。
     BobTime = 0.f;
+    ApplySprintAnimationState(MyChar);
 
     UE_LOG(LogTemp, Warning, TEXT("ʰ��: %s"), *HeldActor->GetName());
 
@@ -604,6 +614,11 @@ void AMyPlayerController::TryPutDown()
         HeldActor->OnPutDown(PlaceLocation, PlaceRotation);
         UE_LOG(LogTemp, Warning, TEXT("����: %s"), *HeldActor->GetName());
         HeldActor = nullptr;
+
+         if (AWomenCharacter *MyChar = Cast<AWomenCharacter>(GetPawn()))
+        {
+            ApplySprintAnimationState(MyChar);
+        }
     }
 }
 
@@ -828,26 +843,18 @@ void AMyPlayerController::OnRep_HeldActor()
         if (MyChar)
         {
             MyChar->HideHeldItemThirdPersonDebugMesh();
+            ApplySprintAnimationState(MyChar);
         }
         return;
     }
 
-    // AWomenCharacter *MyChar = Cast<AWomenCharacter>(GetPawn());
-    // if (!MyChar || !MyChar->HoldPoint)
-    // {
-    //     return;
-    // }
     AttachHeldActorToFirstPersonView(HeldActor);
 
     if (MyChar)
     {
         MyChar->ShowHeldItemThirdPersonDebugMesh(HeldActor);
+        ApplySprintAnimationState(MyChar);
     }
-    // HeldActor->AttachToComponent(
-    //     MyChar->HoldPoint,
-    //     FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-    // HeldActor->SetActorRelativeLocation(FVector::ZeroVector);
-    // HeldActor->SetActorRelativeRotation(FRotator::ZeroRotator);
 }
 
 bool AMyPlayerController::AttachHeldActorToFirstPersonView(APickupActor *PickupActor)
@@ -915,6 +922,16 @@ bool AMyPlayerController::AttachHeldActorToThirdPersonView(APickupActor *PickupA
     return true;
 }
 
+bool AMyPlayerController::CanSprintWithHeldActor() const
+{
+    return !HeldActor || HeldActor->AllowsSprintWhileHeld();
+}
+
+bool AMyPlayerController::CanThrowHeldActor() const
+{
+    return HeldActor && HeldActor->AllowsThrowWhileHeld();
+}
+
 void AMyPlayerController::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
@@ -925,7 +942,9 @@ void AMyPlayerController::Tick(float DeltaTime)
         UCharacterMovementComponent *MoveComp = Char->GetCharacterMovement();
         float CurrentSpeed = MoveComp->MaxWalkSpeed;
         const AWomenCharacter* MyChar = Cast<AWomenCharacter>(Char);
-        const bool bCanSprint = bWantsToSprint && (!MyChar || !MyChar->IsSquat);
+        const bool bIsSquatting = MyChar && MyChar->IsSquat;
+        // const bool bCanSprint = bWantsToSprint && (!MyChar || !MyChar->IsSquat);
+        const bool bCanSprint = bWantsToSprint && CanSprintWithHeldActor() && !MyChar->IsSquat;
 
         if (bCanSprint)
         {
@@ -934,7 +953,8 @@ void AMyPlayerController::Tick(float DeltaTime)
         }
         else
         {
-            float NewSpeed = FMath::FInterpConstantTo(CurrentSpeed, WalkSpeed, DeltaTime, SpeedDownRate);
+            const float TargetWalkSpeed = bIsSquatting ? CrouchSpeed : WalkSpeed;
+            float NewSpeed = FMath::FInterpConstantTo(CurrentSpeed, TargetWalkSpeed, DeltaTime, SpeedDownRate);
             MoveComp->MaxWalkSpeed = NewSpeed;
         }
     }
@@ -1000,6 +1020,9 @@ void AMyPlayerController::ThrowHeldActor()
     if (!HeldActor)
         return;
 
+    if (!CanThrowHeldActor())
+        return;
+
     AWomenCharacter *MyChar = Cast<AWomenCharacter>(GetPawn());
     if (!MyChar)
         return;
@@ -1061,7 +1084,11 @@ void AMyPlayerController::ThrowHeldActor()
     // 先把 HeldActor 置空，避免定时器尚未执行前再次被系统当成“仍在手上”。
     float Force = ThrowForce;
     APickupActor *ActorToThrow = HeldActor;
-    // HeldActor = nullptr;
+    if (ActorToThrow)
+    {
+        ActorToThrow->SetOwner(GetPawn());
+        ActorToThrow->SetInstigator(Cast<APawn>(GetPawn()));
+    }
 
     bool bShouldCloseBeforeThrow = true;
     if (const APickupActorAAASlowTalisman *SlowTalisman = Cast<APickupActorAAASlowTalisman>(ActorToThrow))
@@ -1125,6 +1152,7 @@ void AMyPlayerController::ThrowHeldActor()
                     if (HeldActor == ActorToThrow)
                     {
                         HeldActor = nullptr;
+                        ApplySprintAnimationState(MyChar);
                     }
                     FVector ReleaseCameraLocation = FVector::ZeroVector;
                     FRotator ReleaseCameraRotation = FRotator::ZeroRotator;
@@ -1151,6 +1179,7 @@ void AMyPlayerController::ThrowHeldActor()
                     if (HeldActor == ActorToThrow)
                     {
                         HeldActor = nullptr;
+                        ApplySprintAnimationState(MyChar);
                     }
                     FVector ReleaseCameraLocation = FVector::ZeroVector;
                     FRotator ReleaseCameraRotation = FRotator::ZeroRotator;
@@ -1246,7 +1275,7 @@ void AMyPlayerController::ApplySprintAnimationState(AWomenCharacter* MyChar)
         return;
     }
 
-    const bool bCanSprint = bWantsToSprint && !MyChar->IsSquat;
+    const bool bCanSprint = bWantsToSprint && CanSprintWithHeldActor() && !MyChar->IsSquat;
     MyChar->IsSprint = bCanSprint;
 
     if (!HasAuthority())
@@ -1291,6 +1320,13 @@ void AMyPlayerController::ClearThrowMiddleWindow(AWomenCharacter *MyChar)
 void AMyPlayerController::SprintStart()
 {
     AWomenCharacter *MyChar = Cast<AWomenCharacter>(GetPawn());
+    if (!CanSprintWithHeldActor())
+    {
+        bWantsToSprint = true;
+        ApplySprintAnimationState(MyChar);
+        return;
+    }
+
     if (IsThrowStateActive(MyChar))
     {
         bHasDeferredSprintInput = true;
@@ -1407,7 +1443,7 @@ void AMyPlayerController::ServerSetSprintState_Implementation(bool bNewWantsToSp
 
     if (AWomenCharacter *MyChar = Cast<AWomenCharacter>(GetPawn()))
     {
-        MyChar->IsSprint = bNewWantsToSprint && !MyChar->IsSquat;
+        MyChar->IsSprint = bNewWantsToSprint && CanSprintWithHeldActor() && !MyChar->IsSquat;
     }
 }
 

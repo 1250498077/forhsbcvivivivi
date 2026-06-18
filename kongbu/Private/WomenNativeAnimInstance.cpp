@@ -2,6 +2,7 @@
 
 #include "Animation/AnimMontage.h"
 #include "Animation/AnimSequenceBase.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/Pawn.h"
 #include "Kismet/KismetMathLibrary.h"
 #include "MyPlayerController.h"
@@ -27,7 +28,11 @@ void UWomenNativeAnimInstance::NativeInitializeAnimation()
     bWasSquat = false;
     bPendingCrouchEnter = false;
     bPendingCrouchExit = false;
+    bHasMovementInput = false;
+    bWasMovementInput = false;
     JumpStartTimeRemaining = 0.f;
+    FirstPersonHeldMovingTime = 0.f;
+    FirstPersonHeldWalkReentryTimeRemaining = 0.f;
     SmoothedLookRotation = FRotator::ZeroRotator;
     bAnimationTransitionLocked = false;
     AnimationLockTimeRemaining = 0.f;
@@ -36,6 +41,7 @@ void UWomenNativeAnimInstance::NativeInitializeAnimation()
     ActiveThrowDynamicMontage = nullptr;
     bThrowUsesLoopingUpperBodySequence = false;
     bThrowUsesFullBodySlot = false;
+    bNeedsLocomotionReplayAfterForcedAction = false;
     Spine2LookRotation = FRotator::ZeroRotator;
     NeckLookRotation = FRotator::ZeroRotator;
     HeadLookRotation = FRotator::ZeroRotator;
@@ -108,17 +114,27 @@ void UWomenNativeAnimInstance::NativeUpdateAnimation(float DeltaTime)
     APawn* Pawn = TryGetPawnOwner();
     if (!Pawn) return;
     Speed = Pawn->GetVelocity().Size2D();
+    bHasMovementInput = false;
+    if (const AWomenCharacter* WomenCharacter = Cast<AWomenCharacter>(Pawn))
+    {
+        if (const UCharacterMovementComponent* MovementComponent = WomenCharacter->GetCharacterMovement())
+        {
+            // 判断是否有移动输入（通过加速度大小的平方是否大于极小值来判断）
+            bHasMovementInput = MovementComponent->GetCurrentAcceleration().SizeSquared2D() > KINDA_SMALL_NUMBER;
+        }
+    }
 
     UpdateOneShotActionLock(DeltaTime);
     UpdateNativeLookBoneRotations(DeltaTime);
-    UpdateLocomotionState(DeltaTime);
     UpdateHoldTypeFromOwner();
     HandleHoldTypeChanged();
+    UpdateLocomotionState(DeltaTime);
     HandleThrowMontageState();
 }
 
 void UWomenNativeAnimInstance::UpdateOneShotActionLock(float DeltaTime)
 {
+    const bool bWasOneshotLocked = bOneShotActionLocked;
     if (OneShotActionLockTimeRemaining > 0.f)
     {
         OneShotActionLockTimeRemaining = FMath::Max(0.f, OneShotActionLockTimeRemaining - DeltaTime);
@@ -127,6 +143,11 @@ void UWomenNativeAnimInstance::UpdateOneShotActionLock(float DeltaTime)
     if (OneShotActionLockTimeRemaining <= 0.f)
     {
         bOneShotActionLocked = false;
+        if (bWasOneshotLocked && bNeedsLocomotionReplayAfterForcedAction)
+        {
+            bNeedsLocomotionReplayAfterForcedAction = false;
+            PreviousLocomotionState = static_cast<EWomenNativeLocomotionState>(255);
+        }
     }
 }
 
@@ -244,11 +265,34 @@ void UWomenNativeAnimInstance::UpdateLocomotionState(float DeltaTime)
         JumpStartTimeRemaining = FMath::Max(0.f, JumpStartTimeRemaining - DeltaTime);
     }
 
+    const bool bFirstPersonHoldingItem = IsFirstPersonAnimationInstance()
+    && (CurrentHeldActor || CurrentHoldType != EHoldItemType::None);
+
+    if (FirstPersonHeldWalkReentryTimeRemaining > 0.f)
+    {
+        FirstPersonHeldWalkReentryTimeRemaining = FMath::Max(0.f, FirstPersonHeldWalkReentryTimeRemaining - DeltaTime);
+    }
+
+    if (bFirstPersonHoldingItem && bWasMovementInput && !bHasMovementInput)
+    {
+        FirstPersonHeldWalkReentryTimeRemaining = FirstPersonHeldWalkReentryDelay;
+    }
+
+    if (bFirstPersonHoldingItem && bHasMovementInput)
+    {
+        FirstPersonHeldMovingTime += DeltaTime;
+    }
+    else
+    {
+        FirstPersonHeldMovingTime = 0.f;
+    }
+
     CurrentLocomotionState = ResolveLocomotionState();
     HandleLocomotionStateChanged();
 
     bWasInAir = bIsInAir;
     bWasSquat = bIsSquat;
+    bWasMovementInput = bHasMovementInput;
 }
 
 EWomenNativeLocomotionState UWomenNativeAnimInstance::ResolveLocomotionState() const
@@ -270,7 +314,15 @@ EWomenNativeLocomotionState UWomenNativeAnimInstance::ResolveLocomotionState() c
         return EWomenNativeLocomotionState::CrouchExit;
     }
 
-    const bool bMoving = Speed > MoveSpeedThreshold;
+    bool bMoving = Speed > MoveSpeedThreshold;
+    const bool bFirstPersonHoldingItem = IsFirstPersonAnimationInstance()
+        && (CurrentHeldActor || CurrentHoldType != EHoldItemType::None);
+    if (bMoving && bFirstPersonHoldingItem && (!bHasMovementInput
+    || FirstPersonHeldMovingTime < FirstPersonHeldMovementStartDelay
+    || FirstPersonHeldWalkReentryTimeRemaining > 0.f))
+    {
+        bMoving = false;
+    }
 
     if (bIsSquat)
     {
@@ -365,11 +417,26 @@ bool UWomenNativeAnimInstance::PlayLocomotionAnimation(EWomenNativeLocomotionSta
     const bool bLoop = LocomotionState != EWomenNativeLocomotionState::JumpStart
         && LocomotionState != EWomenNativeLocomotionState::CrouchEnter
         && LocomotionState != EWomenNativeLocomotionState::CrouchExit;
+
+    const bool bFirstPersonHoldingItem = IsFirstPersonAnimationInstance()
+        && (CurrentHeldActor || CurrentHoldType != EHoldItemType::None);
+
+    const bool bReturningToHeldIdle = bFirstPersonHoldingItem
+        && LocomotionState == EWomenNativeLocomotionState::Idle;
+
+    const float BlendInTime = bReturningToHeldIdle
+        ? FMath::Min(LocomotionBlendInTime, FirstPersonHeldIdleBlendTime)
+        : LocomotionBlendInTime;
+
+    const float BlendOutTime = bReturningToHeldIdle
+        ? FMath::Min(LocomotionBlendOutTime, FirstPersonHeldIdleBlendTime)
+        : LocomotionBlendOutTime;
+
     PlaySlotAnimationAsDynamicMontage(
         Animation,
         LocomotionSlotName,
-        LocomotionBlendInTime,
-        LocomotionBlendOutTime,
+        BlendInTime,
+        BlendOutTime,
         1.f,
         bLoop ? MAX_int32 : 1);
 
@@ -481,23 +548,52 @@ bool UWomenNativeAnimInstance::IsFirstPersonAnimationInstance() const
 UAnimSequenceBase* UWomenNativeAnimInstance::GetHeldLocomotionAnimation(EWomenNativeLocomotionState LocomotionState) const
 {
     const FPickupHeldAnimationSet* HeldAnimationSet = GetCurrentHeldAnimationSet();
-    if (!HeldAnimationSet)
+    
+    const bool bHasHoldType = CurrentHoldType != EHoldItemType::None;
+    const FNativeHoldAnimationSet* HoldAnimationSet = bHasHoldType ? HoldAnimations.Find(CurrentHoldType) : nullptr;
+    UAnimSequenceBase* HeldIdlePose = nullptr;
+
+    // 尝试获取 IdlePose
+    if (HeldAnimationSet && HeldAnimationSet->IdlePose)
     {
-        return nullptr;
+        HeldIdlePose = HeldAnimationSet->IdlePose.Get();
     }
+    else if (HoldAnimationSet && HoldAnimationSet->IdlePose)
+    {
+        HeldIdlePose = HoldAnimationSet->IdlePose.Get();
+    }
+
+    const bool bFirstPersonHoldingItem = IsFirstPersonAnimationInstance() 
+        && (CurrentHeldActor || bHasHoldType);
 
     switch (LocomotionState)
     {
         case EWomenNativeLocomotionState::Idle:
-            return HeldAnimationSet->IdlePose.Get();
+            return HeldIdlePose;
         case EWomenNativeLocomotionState::Walk:
-            return HeldAnimationSet->WalkAnimation.Get();
+            if (HeldAnimationSet && HeldAnimationSet->WalkAnimation)
+            {
+                return HeldAnimationSet->WalkAnimation.Get();
+            }
+            return bFirstPersonHoldingItem ? HeldIdlePose : nullptr;
         case EWomenNativeLocomotionState::Run:
-            return HeldAnimationSet->RunAnimation.Get();
+            if (HeldAnimationSet && HeldAnimationSet->RunAnimation)
+            {
+                return HeldAnimationSet->RunAnimation.Get();
+            }
+            return bFirstPersonHoldingItem ? HeldIdlePose : nullptr;
         case EWomenNativeLocomotionState::CrouchIdle:
-            return HeldAnimationSet->CrouchIdleAnimation.Get();
+            if (HeldAnimationSet && HeldAnimationSet->CrouchIdleAnimation)
+            {
+                return HeldAnimationSet->CrouchIdleAnimation.Get();
+            }
+            return HeldIdlePose;
         case EWomenNativeLocomotionState::CrouchWalk:
-            return HeldAnimationSet->CrouchWalkAnimation.Get();
+            if (HeldAnimationSet && HeldAnimationSet->CrouchWalkAnimation)
+            {
+                return HeldAnimationSet->CrouchWalkAnimation.Get();
+            }
+            return bFirstPersonHoldingItem ? HeldIdlePose : nullptr;
         default:
             return nullptr;
     }
@@ -767,7 +863,31 @@ bool UWomenNativeAnimInstance::PlayHitAction()
 
     return PlayOneShotAction(UpperBodyAnimation, Montage);
 }
+bool UWomenNativeAnimInstance::PlaySoulSuckedAction()
+{
+    float LockDuration = 0.f;
+    return PlayInterruptibleFullBodyAction(SoulSuckedAnimation.Get(), SoulSuckedMontage.Get(), LockDuration);
+}
 
+bool UWomenNativeAnimInstance::PlayKnockdownAction()
+{
+    float LockDuration = 0.f;
+    return PlayInterruptibleFullBodyAction(KnockdownAnimation.Get(), KnockdownMontage.Get(), LockDuration);
+}
+
+float UWomenNativeAnimInstance::GetSoulSuckedActionDuration() const
+{
+    if (SoulSuckedMontage)
+        return SoulSuckedMontage->GetPlayLength();
+    return SoulSuckedAnimation ? SoulSuckedAnimation->GetPlayLength() : 0.f;
+}
+
+float UWomenNativeAnimInstance::GetKnockdownActionDuration() const
+{
+    if (KnockdownMontage)
+        return KnockdownMontage->GetPlayLength();
+    return KnockdownAnimation ? KnockdownAnimation->GetPlayLength() : 0.f;
+}
 bool UWomenNativeAnimInstance::IsCrouchAction() const
 {
     return bIsSquat
@@ -820,7 +940,48 @@ bool UWomenNativeAnimInstance::PlayOneShotAction(UAnimSequenceBase* UpperBodyAni
 
     return bPlayed;
 }
+// WomenNativeAnimInstance.cpp
 
+bool UWomenNativeAnimInstance::PlayInterruptibleFullBodyAction(UAnimSequenceBase* FullBodyAnimation, UAnimMontage* Montage, float& OutDuration)
+{
+    OutDuration = 0.f;
+
+    Montage_Stop(0.05f);
+    StopThrowAction();
+
+    bOneShotActionLocked = false;
+    OneShotActionLockTimeRemaining = 0.f;
+    bAnimationTransitionLocked = false;
+    AnimationLockTimeRemaining = 0.f;
+    bNeedsLocomotionReplayAfterForcedAction = true;
+
+    if (Montage)
+    {
+        Montage_Play(Montage);
+        OutDuration = Montage->GetPlayLength();
+    }
+    else if (FullBodyAnimation && !ReactionFullBodySlotName.IsNone())
+    {
+        PlaySlotAnimationAsDynamicMontage(
+            FullBodyAnimation,
+            ReactionFullBodySlotName,
+            ReactionBlendInTime,
+            ReactionBlendOutTime,
+            1.f,
+            1);
+        OutDuration = FullBodyAnimation->GetPlayLength();
+    }
+
+    if (OutDuration > 0.f)
+    {
+        StartOneShotActionLock(OutDuration);
+        bAnimationTransitionLocked = true;
+        AnimationLockTimeRemaining = OutDuration;
+        return true;
+    }
+
+    return false;
+}
 void UWomenNativeAnimInstance::StartOneShotActionLock(float LockDuration)
 {
     bOneShotActionLocked = LockDuration > 0.f;
