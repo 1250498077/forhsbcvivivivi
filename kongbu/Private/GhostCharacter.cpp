@@ -20,6 +20,14 @@ AGhostCharacter::AGhostCharacter()
 {
     PrimaryActorTick.bCanEverTick = true;
 
+    bUseControllerRotationYaw = false;
+    if (UCharacterMovementComponent* MovementComponent = GetCharacterMovement())
+    {
+        MovementComponent->bOrientRotationToMovement = true;
+        MovementComponent->bUseControllerDesiredRotation = false;
+        MovementComponent->RotationRate = FRotator(0.f, GhostBodyRotationRateYaw, 0.f);
+    }
+
     GhostAttachZoneComponent = CreateDefaultSubobject<UCapsuleComponent>(TEXT("GhostAttachZoneComponent"));
     GhostAttachZoneComponent->SetupAttachment(GetMesh());
     GhostAttachZoneComponent->SetRelativeLocation(FVector(0.f, 0.f, 76.f));
@@ -63,6 +71,7 @@ AGhostCharacter::AGhostCharacter()
 void AGhostCharacter::BeginPlay()
 {
     Super::BeginPlay();
+    ApplyGhostTurnSettings();
 
     if (GhostAttachZoneComponent)
     {
@@ -140,6 +149,8 @@ void AGhostCharacter::Tick(float DeltaTime)
 void AGhostCharacter::OnConstruction(const FTransform &Transform)
 {
     Super::OnConstruction(Transform);
+
+    ApplyGhostTurnSettings();
 
     ConfigureGhostAttachZoneCollision();
     UpdateGhostAttachZoneDebugVisibility();
@@ -438,6 +449,19 @@ void AGhostCharacter::UpdateTelekinesisTriggerDebugVisibility() const
     TelekinesisTriggerComponent->SetHiddenInGame(!bShowTelekinesisTriggerDebug);
     TelekinesisTriggerComponent->SetVisibility(true);
     TelekinesisTriggerComponent->ShapeColor = TelekinesisTriggerDebugColor;
+}
+
+void AGhostCharacter::ApplyGhostTurnSettings() const
+{
+    UCharacterMovementComponent* MovementComponent = GetCharacterMovement();
+    if (!MovementComponent || !bEnableGhostTurnSmoothing)
+    {
+        return;
+    }
+
+    MovementComponent->bOrientRotationToMovement = true;
+    MovementComponent->bUseControllerDesiredRotation = false;
+    MovementComponent->RotationRate = FRotator(0.f, GhostBodyRotationRateYaw, 0.f);
 }
 
 void AGhostCharacter::FreezeSoulSuckVictim(AWomenCharacter* Victim) const

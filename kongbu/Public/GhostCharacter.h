@@ -51,6 +51,10 @@ public:
     virtual void Tick(float DeltaTime) override;
     virtual void OnConstruction(const FTransform& Transform) override;
 
+    // 一个鬼蓝图对应一个驱魔鬼类型。比如 BP_Ghost_1 填 1，BP_Ghost_2 填 2。
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ghost|Exorcism")
+    int32 ExorcismGhostTypeId = INDEX_NONE;
+
     // 统一的道具吸附区域。慢符 / 符文器触发这个区域后，会挂到这个组件上。
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ghost|Attach")
     TObjectPtr<UCapsuleComponent> GhostAttachZoneComponent;
@@ -93,6 +97,24 @@ public:
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ghost|Animation|Locomotion", meta = (ClampMin = "0.0"))
     float MoveSpeedThreshold = 10.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ghost|Animation|Turn")
+    bool bEnableGhostTurnSmoothing = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ghost|Animation|Turn", meta = (ClampMin = "0.0"))
+    float GhostBodyRotationRateYaw = 180.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ghost|Animation|Turn")
+    bool bEnableUpperBodyTurnLead = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ghost|Animation|Turn", meta = (ClampMin = "0.0", ClampMax = "90.0"))
+    float UpperBodyTurnMaxYaw = 45.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ghost|Animation|Turn", meta = (ClampMin = "0.0"))
+    float UpperBodyTurnInterpSpeed = 8.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ghost|Animation|Turn", meta = (ClampMin = "0.0"))
+    float UpperBodyTurnReturnSpeed = 6.f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ghost|Soul Suck")
     bool bEnableSoulSuckOnPlayerTouch = true;
@@ -235,6 +257,7 @@ private:
     void UpdateGhostAttachZoneDebugVisibility() const;
     void UpdateSoulSuckTriggerDebugVisibility() const;
     void UpdateTelekinesisTriggerDebugVisibility() const;
+    void ApplyGhostTurnSettings() const;
     void FreezeSoulSuckVictim(AWomenCharacter* Victim) const;
     void UnfreezeSoulSuckVictim(AWomenCharacter* Victim) const;
     float ResolveSoulSuckDuration() const;

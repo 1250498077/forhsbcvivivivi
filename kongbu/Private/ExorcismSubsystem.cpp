@@ -1,6 +1,7 @@
 #include "ExorcismSubsystem.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "GhostCharacter.h"
 #include "PickupActorAAARuneInstrument.h"
 
 namespace
@@ -11,8 +12,8 @@ namespace
     const FString MediumRuneTexturePrefix    = TEXT("book_medium_fuzhou_tietu_");
     const FString HardRuneTexturePrefix      = TEXT("book_hard_fuzhou_tietu_");
     const FString NightmareRuneTexturePrefix = TEXT("book_nightmare_fuzhou_tietu_");
-    const FString GhostMeshScanPath     = TEXT("/Game/AI");
-    const FString GhostMeshPrefix       = TEXT("gui_mesh_");
+    const FString GhostClassScanPath  = TEXT("/Game/AI/gui");
+    const FString GhostClassPrefix    = TEXT("BP_Ghost_");
     const FString BookGhostImageScanPath = TEXT("/Game/item/book");
     const FString BookGhostImagePrefix  = TEXT("book_gui_");
 
@@ -57,11 +58,11 @@ void UExorcismSubsystem::ScanAssets()
     bScanned = true;
 
     ScanRuneTextures();
-    ScanGhostMeshes();
+    ScanGhostClasses();
     ScanBookGhostImages();
 
     UE_LOG(LogTemp, Log,
-        TEXT("ExorcismSubsystem: scanned %d rune textures, %d ghost meshes"),
+        TEXT("ExorcismSubsystem: scanned %d rune textures, %d ghost classes"),
         ScannedRunes.Num(), ScannedGhosts.Num());
 }
 
@@ -253,7 +254,7 @@ bool UExorcismSubsystem::ParseNodeSequenceFromSuffix(
     return OutSequence.Num() >= 2;
 }
 
-void UExorcismSubsystem::ScanGhostMeshes()
+void UExorcismSubsystem::ScanGhostClasses()
 {
     ScannedGhosts.Reset();
 
@@ -261,7 +262,7 @@ void UExorcismSubsystem::ScanGhostMeshes()
         FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
 
     FARFilter Filter;
-    Filter.PackagePaths.Add(FName(*GhostMeshScanPath));
+    Filter.PackagePaths.Add(FName(*GhostClassScanPath));
     Filter.bRecursivePaths = true;
 
     TArray<FAssetData> Assets;
@@ -270,12 +271,12 @@ void UExorcismSubsystem::ScanGhostMeshes()
     for (const FAssetData& Asset : Assets)
     {
         const FString AssetName = Asset.AssetName.ToString();
-        if (!AssetName.StartsWith(GhostMeshPrefix, ESearchCase::IgnoreCase))
+        if (!AssetName.StartsWith(GhostClassPrefix, ESearchCase::IgnoreCase))
         {
             continue;
         }
 
-        const FString IndexStr = AssetName.RightChop(GhostMeshPrefix.Len());
+        const FString IndexStr = AssetName.RightChop(GhostClassPrefix.Len());
         if (IndexStr.IsEmpty())
         {
             continue;
@@ -317,11 +318,11 @@ void UExorcismSubsystem::ScanGhostMeshes()
 
         FExorcismGhostEntry Entry;
         Entry.GhostTypeIndex = TypeIndex;
-        Entry.GhostMeshPath = Asset.GetSoftObjectPath();
+        Entry.GhostClassPath = FSoftClassPath(Asset.GetSoftObjectPath().ToString() + TEXT("_C"));
         ScannedGhosts.Add(MoveTemp(Entry));
 
         UE_LOG(LogTemp, Log,
-            TEXT("Exorcism: ghost mesh '%s' (type %d)"),
+            TEXT("Exorcism: ghost class '%s' (type %d)"),
             *AssetName, TypeIndex);
     }
 
@@ -494,16 +495,37 @@ int32 UExorcismSubsystem::ClaimNextGhostType()
     return TypeId;
 }
 
-FSoftObjectPath UExorcismSubsystem::GetGhostMeshPath(int32 GhostTypeIndex) const
+FSoftClassPath UExorcismSubsystem::GetGhostClassPath(int32 GhostTypeIndex) const
 {
     for (const FExorcismGhostEntry& Ghost : ScannedGhosts)
     {
         if (Ghost.GhostTypeIndex == GhostTypeIndex)
         {
-            return Ghost.GhostMeshPath;
+            return Ghost.GhostClassPath;
         }
     }
-    return FSoftObjectPath();
+    return FSoftClassPath();
+}
+
+TSubclassOf<AGhostCharacter> UExorcismSubsystem::LoadGhostClass(int32 GhostTypeIndex) const
+{
+    const FSoftClassPath GhostClassPath = GetGhostClassPath(GhostTypeIndex);
+    if (!GhostClassPath.IsValid())
+    {
+        return nullptr;
+    }
+
+    UClass* LoadedClass = GhostClassPath.TryLoadClass<AGhostCharacter>();
+    if (!IsValid(LoadedClass) || !LoadedClass->IsChildOf(AGhostCharacter::StaticClass()))
+    {
+        UE_LOG(LogTemp, Warning,
+            TEXT("ExorcismSubsystem: ghost type %d class '%s' is not a GhostCharacter class"),
+            GhostTypeIndex,
+            *GhostClassPath.ToString());
+        return nullptr;
+    }
+
+    return LoadedClass;
 }
 
 FSoftObjectPath UExorcismSubsystem::GetBookGhostImagePath(int32 GhostTypeIndex) const

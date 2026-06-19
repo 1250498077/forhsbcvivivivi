@@ -1,6 +1,6 @@
 
 #include "MyPlayerController.h"
-#include "WomenCharacter.h" // �� ����һ��
+#include "WomenCharacter.h" 
 #include "GameFramework/CharacterMovementComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
@@ -14,6 +14,7 @@
 #include "InputCoreTypes.h"
 #include "Net/UnrealNetwork.h"
 #include "PickupActor.h"
+#include "PickupActorAAARuneCanvasInstrument.h"
 #include "PickupActorAAARuneGridInstrument.h"
 #include "PickupActorAAARuneInstrument.h"
 #include "PickupActorAAASlowTalisman.h"
@@ -232,6 +233,28 @@ void AMyPlayerController::HandleRightClickPressed()
         return;
     }
 
+    if (APickupActorAAARuneCanvasInstrument *RuneCanvasInstrument = Cast<APickupActorAAARuneCanvasInstrument>(HeldActor))
+    {
+        if (RuneCanvasInstrument->BeginRuneDraw(this))
+        {
+            bShowMouseCursor = true;
+            FInputModeGameAndUI InputMode;
+            InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::LockAlways);
+            InputMode.SetHideCursorDuringCapture(false);
+            SetInputMode(InputMode);
+
+            FVector2D StartScreenPosition = FVector2D::ZeroVector;
+            if (RuneCanvasInstrument->GetPreferredDrawStartScreenPosition(this, StartScreenPosition))
+            {
+                SetMouseLocation(
+                    FMath::RoundToInt(StartScreenPosition.X),
+                    FMath::RoundToInt(StartScreenPosition.Y));
+                RuneCanvasInstrument->UpdateRuneDrawFromScreenPosition(this, StartScreenPosition);
+            }
+        }
+        return;
+    }
+
     TryCloseHeldActorBehavior();
 }
 
@@ -286,6 +309,21 @@ void AMyPlayerController::HandleRightClickReleased()
         }
 
         RuneInstrument->CommitRuneSequenceAuthority(FinalSequence, SolvingActor);
+        return;
+    }
+
+    APickupActorAAARuneCanvasInstrument *RuneCanvasInstrument = Cast<APickupActorAAARuneCanvasInstrument>(HeldActor);
+    if (RuneCanvasInstrument && RuneCanvasInstrument->IsRuneDrawActive())
+    {
+        bShowMouseCursor = false;
+        SetInputMode(FInputModeGameOnly());
+
+        const TArray<int32> FinalSequence = RuneCanvasInstrument->EndRuneDraw(this);
+        if (!HasAuthority())
+        {
+            ServerSubmitRuneSequence(RuneCanvasInstrument, FinalSequence);
+            return;
+        }
         return;
     }
 
@@ -390,6 +428,13 @@ void AMyPlayerController::LookUp(const FInputActionValue &Value)
         }
     }
     // ==== 新增结束：矩阵法器绘制期间也锁定视角俯仰 ====
+    if (APickupActorAAARuneCanvasInstrument *RuneCanvasInstrument = Cast<APickupActorAAARuneCanvasInstrument>(HeldActor))
+    {
+        if (RuneCanvasInstrument->IsRuneDrawActive())
+        {
+            return;
+        }
+    }
 
     float AxisValue = Value.Get<float>();
     AddPitchInput(AxisValue * MouseSensitivity);
@@ -415,6 +460,14 @@ void AMyPlayerController::LookRight(const FInputActionValue &Value)
         }
     }
     // ==== 新增结束：矩阵法器绘制期间也锁定视角左右旋转 ====
+
+    if (APickupActorAAARuneCanvasInstrument *RuneCanvasInstrument = Cast<APickupActorAAARuneCanvasInstrument>(HeldActor))
+    {
+        if (RuneCanvasInstrument->IsRuneDrawActive())
+        {
+            return;
+        }
+    }
 
     float AxisValue = Value.Get<float>();
     AddYawInput(AxisValue * MouseSensitivity);
@@ -1223,6 +1276,20 @@ void AMyPlayerController::UpdateHeldRuneInstrumentDraw()
         return;
     }
 
+    APickupActorAAARuneCanvasInstrument *RuneCanvasInstrument = Cast<APickupActorAAARuneCanvasInstrument>(HeldActor);
+    if (RuneCanvasInstrument && RuneCanvasInstrument->IsRuneDrawActive())
+    {
+        float MouseX = 0.f;
+        float MouseY = 0.f;
+        if (!GetMousePosition(MouseX, MouseY))
+        {
+            return;
+        }
+
+        RuneCanvasInstrument->UpdateRuneDrawFromScreenPosition(this, FVector2D(MouseX, MouseY));
+        return;
+    }
+
     // ==== 新增：Tick 中持续更新矩阵法器的鼠标滑格 ====
     // 每帧读取鼠标屏幕坐标，交给矩阵法器自行判断当前扫到了哪个格子。
     APickupActorAAARuneGridInstrument *RuneGridInstrument = Cast<APickupActorAAARuneGridInstrument>(HeldActor);
@@ -1428,8 +1495,14 @@ void AMyPlayerController::ServerSubmitRuneSequence_Implementation(
     if (APickupActorAAARuneGridInstrument *RuneGridInstrument = Cast<APickupActorAAARuneGridInstrument>(RuneActor))
     {
         RuneGridInstrument->CommitRuneSequenceAuthority(NodeSequence, SolvingActor);
+        return;
     }
-    // ==== 新增结束：服务端统一接收“原符器 / 矩阵法器”两种结果 ====
+
+    if (APickupActorAAARuneCanvasInstrument *RuneCanvasInstrument = Cast<APickupActorAAARuneCanvasInstrument>(RuneActor))
+    {
+        RuneCanvasInstrument->CommitRuneSequenceAuthority(NodeSequence, SolvingActor);
+        // ==== 新增结束：服务端统一接收“原符器 / 矩阵法器”两种结果 ====
+    }
 }
 
 void AMyPlayerController::ServerThrowHeldActor_Implementation()

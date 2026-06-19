@@ -33,6 +33,7 @@
 #include "ExorcismSubsystem.generated.h"
 
 class UTexture2D;
+class AGhostCharacter;
 struct FRuneInstrumentPattern;
 
 UENUM(BlueprintType)
@@ -72,15 +73,14 @@ struct FExorcismGhostEntry
 {
     GENERATED_BODY()
 
-    // 鬼类型编号（从 gui_mesh_X 的 X 解析）
+    // 鬼类型编号 (从 BP_Ghost_X 的 X 解析)
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Exorcism")
     int32 GhostTypeIndex = 0;
 
-    // 鬼网格体资产路径
+    // 鬼角色蓝图类路径
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Exorcism")
-    FSoftObjectPath GhostMeshPath;
+    FSoftClassPath GhostClassPath;
 
-    // 书本上对应鬼的图片纹理路径
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Exorcism")
     FSoftObjectPath BookGhostImagePath;
 };
@@ -127,13 +127,17 @@ public:
     UFUNCTION(BlueprintPure, Category = "Exorcism")
     int32 GetGhostTypeForPatternId(FName PatternId) const;
 
-    // 为一个鬼领取一个随机外形类型。返回鬼类型编号；池耗尽时返回 INDEX_NONE。
+    // 为一个鬼领取一个随机类型。返回鬼类型型编号；池耗尽时返回 INDEX_NONE。
     UFUNCTION(BlueprintCallable, Category = "Exorcism")
     int32 ClaimNextGhostType();
 
-    // 根据鬼类型编号获取网格体路径
+    // 根据鬼类型编号获取鬼角色蓝图类路径
     UFUNCTION(BlueprintPure, Category = "Exorcism")
-    FSoftObjectPath GetGhostMeshPath(int32 GhostTypeIndex) const;
+    FSoftClassPath GetGhostClassPath(int32 GhostTypeIndex) const;
+
+    // 根据鬼类型编号加载鬼角色蓝图类，供 GameMode 或 GhostSpawner 直接 SpawnActor 使用。
+    UFUNCTION(BlueprintCallable, Category = "Exorcism")
+    TSubclassOf<AGhostCharacter> LoadGhostClass(int32 GhostTypeIndex) const;
 
     // 根据鬼类型编号获取书中对应的鬼图纹理路径
     UFUNCTION(BlueprintPure, Category = "Exorcism")
@@ -160,7 +164,7 @@ private:
     bool ParseNodeSequenceFromSuffix(const FString& NumberPart, TArray<int32>& OutSequence) const;
     void ScanAssets();
     void ScanRuneTextures();
-    void ScanGhostMeshes();
+    void ScanGhostClasses();
     void ScanBookGhostImages();
 
     // TODO(UI): 当前先写死难度，后续由玩家 UI 选择后赋值。

@@ -13,7 +13,7 @@ class UInputAction;
 class AConfigurableDoorActor;
 class APickupActor;
 class APickupActorAAARuneInstrument;
-class PickupActorAAARuneGridInstrument;
+class APickupActorAAARuneGridInstrument;
 class AWomenCharacter;
 
 UCLASS()
@@ -217,6 +217,7 @@ protected:
     bool bWantsToSprint = false;
     bool bHasDeferredSprintInput = false;
     bool bDeferredWantsToSprint = false;
+    bool bIsRunAbtInputActive = false;
 
     void SprintStart();
     void SprintStop();

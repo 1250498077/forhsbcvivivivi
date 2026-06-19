@@ -338,6 +338,19 @@ void AMyAIController::AssignExorcismGhostType()
         return;
     }
 
+    if (const AGhostCharacter* GhostPawn = Cast<AGhostCharacter>(GetPawn()))
+    {
+        if (GhostPawn->ExorcismGhostTypeId != INDEX_NONE)
+        {
+            ExorcismGhostTypeId = GhostPawn->ExorcismGhostTypeId;
+            UE_LOG(LogTemp, Log, TEXT("%s: using configured ghost type %d from %s"),
+                *GetName(),
+                ExorcismGhostTypeId,
+                *GetNameSafe(GhostPawn));
+            return;
+        }
+    }
+
     const UGameInstance* GI = GetGameInstance();
     if (!GI)
     {
@@ -357,72 +370,17 @@ void AMyAIController::AssignExorcismGhostType()
         return;
     }
 
-    const FSoftObjectPath MeshPath = Subsystem->GetGhostMeshPath(ExorcismGhostTypeId);
-    if (!MeshPath.IsValid())
+    const FSoftClassPath GhostClassPath = Subsystem->GetGhostClassPath(ExorcismGhostTypeId);
+    if (!GhostClassPath.IsValid())
     {
-        UE_LOG(LogTemp, Warning, TEXT("%s: ghost type %d has no mesh path"), *GetName(), ExorcismGhostTypeId);
+        UE_LOG(LogTemp, Warning, TEXT("%s: ghost type %d has no ghost class path"), *GetName(), ExorcismGhostTypeId);
         return;
     }
 
-    UObject* LoadedAsset = MeshPath.TryLoad();
-    if (!LoadedAsset)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("%s: failed to load ghost mesh '%s'"), *GetName(), *MeshPath.ToString());
-        return;
-    }
-
-    APawn* ControlledPawn = GetPawn();
-    if (!IsValid(ControlledPawn))
-    {
-        return;
-    }
-
-    // 尝试作为 SkeletalMesh 设置到 Character 的默认 Mesh 上
-    if (ACharacter* ControlledCharacter = Cast<ACharacter>(ControlledPawn))
-    {
-        if (USkeletalMesh* SkelMesh = Cast<USkeletalMesh>(LoadedAsset))
-        {
-            // SetSkeletalMeshAsset 不会自动清除组件上已有的材质覆盖。
-            // 若之前的隐身状态已把动态材质写入覆盖槽，直接换网格后 GetMaterial()
-            // 仍会返回那些动态材质，导致 CacheOriginalGhostMaterials 把隐身材质
-            // 当成"原始材质"缓存，之后手电照亮时恢复的仍是隐身材质。
-            // 解决方法：换网格前先把覆盖槽清空，使 GetMaterial() 回落到网格资产材质。
-            USkeletalMeshComponent* SkelComp = ControlledCharacter->GetMesh();
-            for (int32 MatIdx = 0; MatIdx < GhostVisualMaterials.Num(); ++MatIdx)
-            {
-                SkelComp->SetMaterial(MatIdx, nullptr);
-            }
-            SkelComp->SetSkeletalMeshAsset(SkelMesh);
-            bGhostVisualStateApplied = false;
-            OriginalGhostMaterials.Reset();
-            GhostVisualMaterials.Reset();
-            ApplyGhostVisualState();
-            UE_LOG(LogTemp, Log, TEXT("%s: applied skeletal mesh for ghost type %d"), *GetName(), ExorcismGhostTypeId);
-            return;
-        }
-    }
-
-    // 回退：尝试作为 StaticMesh 设置到第一个 StaticMeshComponent 上
-    if (UStaticMesh* StatMesh = Cast<UStaticMesh>(LoadedAsset))
-    {
-        if (UStaticMeshComponent* SMC = ControlledPawn->FindComponentByClass<UStaticMeshComponent>())
-        {
-            // 同上，换静态网格前先清除组件材质覆盖。
-            for (int32 MatIdx = 0; MatIdx < GhostVisualMaterials.Num(); ++MatIdx)
-            {
-                SMC->SetMaterial(MatIdx, nullptr);
-            }
-            SMC->SetStaticMesh(StatMesh);
-            bGhostVisualStateApplied = false;
-            OriginalGhostMaterials.Reset();
-            GhostVisualMaterials.Reset();
-            ApplyGhostVisualState();
-            UE_LOG(LogTemp, Log, TEXT("%s: applied static mesh for ghost type %d"), *GetName(), ExorcismGhostTypeId);
-            return;
-        }
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("%s: loaded asset is not a usable mesh type"), *GetName());
+    UE_LOG(LogTemp, Log, TEXT("%s: claimed ghost type %d (%s)"),
+        *GetName(),
+        ExorcismGhostTypeId,
+        *GhostClassPath.ToString());
 }
 
 // Tick 是 UE 每帧调用一次的更新函数。

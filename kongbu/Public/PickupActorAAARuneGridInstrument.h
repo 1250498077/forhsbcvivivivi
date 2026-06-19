@@ -193,7 +193,7 @@ protected:
     bool bRequireExactPatternMatch = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneGrid|Visual")
-    bool bEnableLineRendering = false;
+    bool bEnableLineRendering = true;
 
 //=======================
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneGrid|Preset")
@@ -334,6 +334,7 @@ private:
     void ApplyMaterialToCell(UStaticMeshComponent* CellComponent, UMaterialInterface* Material) const;
     void SetHoveredCellId(int32 NewHoveredCellId, bool bForceBroadcast = false);
     void RebuildLineMeshes(const TArray<int32>& CellSequence);
+    void AppendLineMeshes(const TArray<int32>& CellSequence, int32 FirstSegmentEndIndex);
     void ClearLineMeshes();
     void CacheOriginalCellMaterials(int32 CellId, UStaticMeshComponent* CellComponent);
 };

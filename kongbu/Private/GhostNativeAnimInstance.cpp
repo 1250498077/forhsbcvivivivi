@@ -16,6 +16,8 @@ void UGhostNativeAnimInstance::NativeInitializeAnimation()
     bIsOpeningDoor = false;
     bIsSoulSucking = false;
     ActionLockTimeRemaining = 0.f;
+    DesiredUpperBodyYawOffset = 0.f;
+    UpperBodyYawOffset = 0.f;
     ActiveActionDynamicMontage = nullptr;
     bHasPlayedLocomotion = false;
 }
@@ -37,6 +39,8 @@ void UGhostNativeAnimInstance::NativeUpdateAnimation(float DeltaTime)
     {
         CurrentAIState = AIController->GetCurrentAIState();
     }
+
+    UpdateUpperBodyTurnLead(GhostOwner, DeltaTime);
 
     UpdateActionLock(DeltaTime);
 
@@ -144,6 +148,63 @@ float UGhostNativeAnimInstance::GetKnockdownActionDuration() const
 AGhostCharacter* UGhostNativeAnimInstance::GetGhostOwner() const
 {
     return Cast<AGhostCharacter>(TryGetPawnOwner());
+}
+
+void UGhostNativeAnimInstance::UpdateUpperBodyTurnLead(const AGhostCharacter* GhostOwner, float DeltaTime)
+{
+    if (!GhostOwner || !GhostOwner->bEnableUpperBodyTurnLead)
+    {
+        DesiredUpperBodyYawOffset = 0.f;
+        UpperBodyYawOffset = FMath::FInterpTo(UpperBodyYawOffset, 0.f, DeltaTime, 6.f);
+        return;
+    }
+
+    FVector DesiredDirection = FVector::ZeroVector;
+    if (CurrentAIState == EEnemyAIState::Chase)
+    {
+        if (const AMyAIController* AIController = Cast<AMyAIController>(GhostOwner->GetController()))
+        {
+            if (const AActor* TargetPlayer = AIController->GetCurrentTargetPlayer())
+            {
+                DesiredDirection = TargetPlayer->GetActorLocation() - GhostOwner->GetActorLocation();
+                DesiredDirection.Z = 0.f;
+            }
+        }
+    }
+
+    if (DesiredDirection.IsNearlyZero() && Speed > GhostOwner->MoveSpeedThreshold)
+    {
+        DesiredDirection = GhostOwner->GetVelocity();
+        DesiredDirection.Z = 0.f;
+    }
+
+    if (DesiredDirection.IsNearlyZero())
+    {
+        DesiredUpperBodyYawOffset = 0.f;
+    }
+    else
+    {
+        const float DeltaYaw = FMath::FindDeltaAngleDegrees(
+            GhostOwner->GetActorRotation().Yaw,
+            DesiredDirection.Rotation().Yaw
+        );
+        DesiredUpperBodyYawOffset = FMath::Clamp(
+            DeltaYaw,
+            -GhostOwner->UpperBodyTurnMaxYaw,
+            GhostOwner->UpperBodyTurnMaxYaw
+        );
+    }
+
+    const float InterpSpeed = FMath::IsNearlyZero(DesiredUpperBodyYawOffset, 1.f)
+        ? GhostOwner->UpperBodyTurnReturnSpeed
+        : GhostOwner->UpperBodyTurnInterpSpeed;
+
+    UpperBodyYawOffset = FMath::FInterpTo(
+        UpperBodyYawOffset,
+        DesiredUpperBodyYawOffset,
+        DeltaTime,
+        InterpSpeed
+    );
 }
 
 void UGhostNativeAnimInstance::UpdateActionLock(float DeltaTime)

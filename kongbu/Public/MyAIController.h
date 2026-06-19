@@ -153,8 +153,7 @@ public:
     UFUNCTION(BlueprintCallable, Category = "AI|Fear|Rage")
     void ApplyFearAngerStimulus(const FFearStimulus& Stimulus);
 
-    // 为当前鬼从 ExorcismSubsystem 领取随机外形，并替换网格体。
-    // 在 OnPossess 中自动调用；也可在蓝图里手动调用以刷新外形。
+    // 为当前鬼确定驱魔类型。优先使用 GhostCharacter 蓝图里配置的类型编号，未配置时再从 ExorcismSubsystem 领取。
     UFUNCTION(BlueprintCallable, Category = "AI|Exorcism")
     void AssignExorcismGhostType();
 

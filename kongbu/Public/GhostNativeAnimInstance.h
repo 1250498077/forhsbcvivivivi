@@ -50,6 +50,12 @@ public:
     UPROPERTY(BlueprintReadOnly, Category = "Ghost Animation|Action")
     float ActionLockTimeRemaining = 0.f;
 
+    UPROPERTY(BlueprintReadOnly, Category = "Ghost Animation|Turn")
+    float DesiredUpperBodyYawOffset = 0.f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Ghost Animation|Turn")
+    float UpperBodyYawOffset = 0.f;
+
     UFUNCTION(BlueprintCallable, Category = "Ghost Animation|Action")
     bool PlayOpenDoorAction();
 
@@ -64,6 +70,7 @@ public:
 
 protected:
     AGhostCharacter* GetGhostOwner() const;
+    void UpdateUpperBodyTurnLead(const AGhostCharacter* GhostOwner, float DeltaTime);
     void UpdateActionLock(float DeltaTime);
     EGhostNativeLocomotionState ResolveLocomotionState(const AGhostCharacter* GhostOwner) const;
     void HandleLocomotionStateChanged(const AGhostCharacter* GhostOwner);
