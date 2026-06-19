@@ -135,6 +135,7 @@ TArray<int32> APickupActorAAARuneCanvasInstrument::EndRuneDraw(APlayerController
     RestoreHeldCollisionAfterMouseTrace();
     SolvedPatternId = NAME_None;
     bPatternSolved = TryResolveAcceptedPattern(RecognizedNodeSequence, SolvedPatternId);
+    LogRecognizedNodeSequence(TEXT("EndRuneDraw"));
 
     ReceiveRuneCanvasDrawStateChanged(DrawnUVPoints, false);
 
@@ -167,6 +168,7 @@ void APickupActorAAARuneCanvasInstrument::CommitRuneSequenceAuthority(
     RecognizedNodeSequence = NodeSequence;
     SolvedPatternId = NAME_None;
     bPatternSolved = TryResolveAcceptedPattern(RecognizedNodeSequence, SolvedPatternId);
+    LogRecognizedNodeSequence(TEXT("CommitRuneSequenceAuthority"));
 
     ReceiveRuneCanvasDrawStateChanged(DrawnUVPoints, false);
     ReceiveRuneCanvasNodeSequenceChanged(
@@ -184,6 +186,7 @@ void APickupActorAAARuneCanvasInstrument::ClearDrawTexture()
     if (EnsureDrawResources() && DrawRenderTarget)
     {
         UKismetRenderingLibrary::ClearRenderTarget2D(this, DrawRenderTarget, DrawTextureClearColor);
+        DrawRecognitionGridGuide();
     }
 }
 
@@ -193,6 +196,18 @@ void APickupActorAAARuneCanvasInstrument::ReinitializeDrawResources()
     CardDynamicMaterial = nullptr;
     EnsureDrawResources();
     ClearDrawTexture();
+}
+
+int32 APickupActorAAARuneCanvasInstrument::GetHiddenNodeId(int32 Row, int32 Column) const
+{
+    const int32 SafeRows = FMath::Max(1, HiddenNodeRows);
+    const int32 SafeColumns = FMath::Max(1, HiddenNodeColumns);
+    if (Row < 0 || Row >= SafeRows || Column < 0 || Column >= SafeColumns)
+    {
+        return INDEX_NONE;
+    }
+
+    return Row * SafeColumns + Column + 1;
 }
 
 void APickupActorAAARuneCanvasInstrument::EnableMouseTraceCollisionIfNeeded()
@@ -235,6 +250,30 @@ bool APickupActorAAARuneCanvasInstrument::EnsureDrawResources()
     if (!DrawRenderTarget)
     {
         const int32 SafeResolution = FMath::Clamp(DrawTextureResolution, 64, 4096);
+        int32 TargetWidth = SafeResolution;
+        int32 TargetHeight = SafeResolution;
+
+        if (bMatchDrawTextureAspectToSurface)
+        {
+            const float SafeSurfaceWidth = FMath::Max(UE_KINDA_SMALL_NUMBER, DrawSurfaceSize.X);
+            const float SafeSurfaceHeight = FMath::Max(UE_KINDA_SMALL_NUMBER, DrawSurfaceSize.Y);
+
+            if (SafeSurfaceWidth >= SafeSurfaceHeight)
+            {
+                TargetHeight = FMath::Clamp(
+                    FMath::RoundToInt(static_cast<float>(SafeResolution) * (SafeSurfaceHeight / SafeSurfaceWidth)),
+                    64,
+                    4096);
+            }
+            else
+            {
+                TargetWidth = FMath::Clamp(
+                    FMath::RoundToInt(static_cast<float>(SafeResolution) * (SafeSurfaceWidth / SafeSurfaceHeight)),
+                    64,
+                    4096);
+            }
+        }
+
         DrawRenderTarget = NewObject<UTextureRenderTarget2D>(this, TEXT("RuneCanvasDrawRenderTarget"));
         if (!DrawRenderTarget)
         {
@@ -242,9 +281,10 @@ bool APickupActorAAARuneCanvasInstrument::EnsureDrawResources()
         }
 
         DrawRenderTarget->ClearColor = DrawTextureClearColor;
-        DrawRenderTarget->InitAutoFormat(SafeResolution, SafeResolution);
+        DrawRenderTarget->InitAutoFormat(TargetWidth, TargetHeight);
         DrawRenderTarget->UpdateResourceImmediate(true);
         UKismetRenderingLibrary::ClearRenderTarget2D(this, DrawRenderTarget, DrawTextureClearColor);
+        DrawRecognitionGridGuide();
     }
 
     if (!CardDynamicMaterial && MeshComponent)
@@ -261,6 +301,99 @@ bool APickupActorAAARuneCanvasInstrument::EnsureDrawResources()
 
     return DrawRenderTarget != nullptr;
 }
+
+bool APickupActorAAARuneCanvasInstrument::IsUVInsideRecognitionArea(const FVector2D& UV) const
+{
+    const FVector2D SafeAreaSize(
+        FMath::Clamp(RecognitionAreaSizeUV.X, 0.01f, 1.f),
+        FMath::Clamp(RecognitionAreaSizeUV.Y, 0.01f, 1.f));
+    const FVector2D AreaMin = RecognitionAreaCenterUV - SafeAreaSize * 0.5f;
+    const FVector2D AreaMax = RecognitionAreaCenterUV + SafeAreaSize * 0.5f;
+
+    return UV.X >= AreaMin.X && UV.X <= AreaMax.X && UV.Y >= AreaMin.Y && UV.Y <= AreaMax.Y;
+}
+
+FVector2D APickupActorAAARuneCanvasInstrument::NormalizeUVToRecognitionArea(const FVector2D& UV) const
+{
+    const FVector2D SafeAreaSize(
+        FMath::Clamp(RecognitionAreaSizeUV.X, 0.01f, 1.f),
+        FMath::Clamp(RecognitionAreaSizeUV.Y, 0.01f, 1.f));
+    const FVector2D AreaMin = RecognitionAreaCenterUV - SafeAreaSize * 0.5f;
+
+    return FVector2D(
+        (UV.X - AreaMin.X) / SafeAreaSize.X,
+        (UV.Y - AreaMin.Y) / SafeAreaSize.Y);
+}
+
+FVector2D APickupActorAAARuneCanvasInstrument::DenormalizeRecognitionAreaUV(const FVector2D& AreaUV) const
+{
+    const FVector2D SafeAreaSize(
+        FMath::Clamp(RecognitionAreaSizeUV.X, 0.01f, 1.f),
+        FMath::Clamp(RecognitionAreaSizeUV.Y, 0.01f, 1.f));
+    const FVector2D AreaMin = RecognitionAreaCenterUV - SafeAreaSize * 0.5f;
+
+    return AreaMin + FVector2D(AreaUV.X * SafeAreaSize.X, AreaUV.Y * SafeAreaSize.Y);
+}
+
+void APickupActorAAARuneCanvasInstrument::DrawRecognitionGridGuide()
+{
+    if (!bDrawRecognitionGridGuide || !DrawRenderTarget)
+    {
+        return;
+    }
+
+    UCanvas* Canvas = nullptr;
+    FVector2D CanvasSize = FVector2D::ZeroVector;
+    FDrawToRenderTargetContext DrawContext;
+    UKismetRenderingLibrary::BeginDrawCanvasToRenderTarget(this, DrawRenderTarget, Canvas, CanvasSize, DrawContext);
+
+    if (Canvas)
+    {
+        const FVector2D AreaMin = DenormalizeRecognitionAreaUV(FVector2D::ZeroVector);
+        const FVector2D AreaMax = DenormalizeRecognitionAreaUV(FVector2D(1.f, 1.f));
+        const FVector2D TopLeft(AreaMin.X * CanvasSize.X, AreaMin.Y * CanvasSize.Y);
+        const FVector2D TopRight(AreaMax.X * CanvasSize.X, AreaMin.Y * CanvasSize.Y);
+        const FVector2D BottomLeft(AreaMin.X * CanvasSize.X, AreaMax.Y * CanvasSize.Y);
+        const FVector2D BottomRight(AreaMax.X * CanvasSize.X, AreaMax.Y * CanvasSize.Y);
+
+        Canvas->K2_DrawLine(TopLeft, TopRight, RecognitionGridGuideThicknessPixels, RecognitionGridGuideColor);
+        Canvas->K2_DrawLine(TopRight, BottomRight, RecognitionGridGuideThicknessPixels, RecognitionGridGuideColor);
+        Canvas->K2_DrawLine(BottomRight, BottomLeft, RecognitionGridGuideThicknessPixels, RecognitionGridGuideColor);
+        Canvas->K2_DrawLine(BottomLeft, TopLeft, RecognitionGridGuideThicknessPixels, RecognitionGridGuideColor);
+
+        const int32 SafeRows = FMath::Max(1, HiddenNodeRows);
+        const int32 SafeColumns = FMath::Max(1, HiddenNodeColumns);
+        const float SafePadding = FMath::Clamp(HiddenNodeEdgePaddingUV, 0.f, 0.45f);
+        const float Span = FMath::Max(UE_KINDA_SMALL_NUMBER, 1.f - SafePadding * 2.f);
+        const float CrossHalfSizePixels = FMath::Max(4.f, RecognitionGridGuideThicknessPixels * 3.f);
+
+        for (int32 RowIndex = 0; RowIndex < SafeRows; ++RowIndex)
+        {
+            for (int32 ColumnIndex = 0; ColumnIndex < SafeColumns; ++ColumnIndex)
+            {
+                const FVector2D AreaNodeUV(
+                    SafeColumns == 1 ? 0.5f : SafePadding + (static_cast<float>(ColumnIndex) / static_cast<float>(SafeColumns - 1)) * Span,
+                    SafeRows == 1 ? 0.5f : SafePadding + (static_cast<float>(RowIndex) / static_cast<float>(SafeRows - 1)) * Span);
+                const FVector2D NodeUV = DenormalizeRecognitionAreaUV(AreaNodeUV);
+                const FVector2D NodePixel(NodeUV.X * CanvasSize.X, NodeUV.Y * CanvasSize.Y);
+
+                Canvas->K2_DrawLine(
+                    NodePixel - FVector2D(CrossHalfSizePixels, 0.f),
+                    NodePixel + FVector2D(CrossHalfSizePixels, 0.f),
+                    RecognitionGridGuideThicknessPixels,
+                    RecognitionGridGuideColor);
+                Canvas->K2_DrawLine(
+                    NodePixel - FVector2D(0.f, CrossHalfSizePixels),
+                    NodePixel + FVector2D(0.f, CrossHalfSizePixels),
+                    RecognitionGridGuideThicknessPixels,
+                    RecognitionGridGuideColor);
+            }
+        }
+    }
+
+    UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(this, DrawContext);
+}
+
 
 bool APickupActorAAARuneCanvasInstrument::ResolveDrawUVFromScreenPosition(
     APlayerController* UsingController,
@@ -319,6 +452,11 @@ bool APickupActorAAARuneCanvasInstrument::ResolveDrawUVFromScreenPosition(
         return false;
     }
 
+    if (bRestrictDrawingToRecognitionArea && !IsUVInsideRecognitionArea(FVector2D(U, V)))
+    {
+        return false;
+    }
+
     OutUV = FVector2D(U, V);
     return true;
 }
@@ -373,8 +511,18 @@ bool APickupActorAAARuneCanvasInstrument::ResolveDrawUVFromMouseTrace(
         FVector2D CollisionUV = FVector2D::ZeroVector;
         if (UGameplayStatics::FindCollisionUV(HitResult, FMath::Max(0, MouseTraceUVChannel), CollisionUV))
         {
+            if (CollisionUV.X < 0.f || CollisionUV.X > 1.f || CollisionUV.Y < 0.f || CollisionUV.Y > 1.f)
+            {
+                continue;
+            }
+
+            if (bRestrictDrawingToRecognitionArea && !IsUVInsideRecognitionArea(CollisionUV))
+            {
+                continue;
+            }
+
             OutUV = CollisionUV;
-            return OutUV.X >= 0.f && OutUV.X <= 1.f && OutUV.Y >= 0.f && OutUV.Y <= 1.f;
+            return true;
         }
     }
 
@@ -412,7 +560,19 @@ void APickupActorAAARuneCanvasInstrument::DrawStrokeSegment(const FVector2D& Sta
     {
         const FVector2D StartPixel(StartUV.X * CanvasSize.X, StartUV.Y * CanvasSize.Y);
         const FVector2D EndPixel(EndUV.X * CanvasSize.X, EndUV.Y * CanvasSize.Y);
-        Canvas->K2_DrawLine(StartPixel, EndPixel, StrokeThicknessPixels, StrokeColor);
+        float AdjustedStrokeThicknessPixels = StrokeThicknessPixels;
+        if (bCompensateStrokeAspectRatio)
+        {
+            const FVector2D SegmentDirection = (EndUV - StartUV).GetSafeNormal();
+            const FVector2D SegmentNormal(-SegmentDirection.Y, SegmentDirection.X);
+            const float SafeWidth = FMath::Max(UE_KINDA_SMALL_NUMBER, DrawSurfaceSize.X);
+            const float SafeHeight = FMath::Max(UE_KINDA_SMALL_NUMBER, DrawSurfaceSize.Y);
+            const float NormalPhysicalScale = FMath::Sqrt(
+                FMath::Square(SegmentNormal.X * SafeWidth) + FMath::Square(SegmentNormal.Y * SafeHeight));
+            const float TargetPhysicalScale = FMath::Min(SafeWidth, SafeHeight);
+            AdjustedStrokeThicknessPixels *= TargetPhysicalScale / FMath::Max(UE_KINDA_SMALL_NUMBER, NormalPhysicalScale);
+        }
+        Canvas->K2_DrawLine(StartPixel, EndPixel, FMath::Max(1.f, AdjustedStrokeThicknessPixels), StrokeColor);
     }
 
     UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(this, DrawContext);
@@ -420,13 +580,19 @@ void APickupActorAAARuneCanvasInstrument::DrawStrokeSegment(const FVector2D& Sta
 
 int32 APickupActorAAARuneCanvasInstrument::ResolveHiddenNodeFromUV(const FVector2D& UV) const
 {
+    if (!IsUVInsideRecognitionArea(UV))
+    {
+        return INDEX_NONE;
+    }
+
+    const FVector2D AreaUV = NormalizeUVToRecognitionArea(UV);
     const int32 SafeRows = FMath::Max(1, HiddenNodeRows);
     const int32 SafeColumns = FMath::Max(1, HiddenNodeColumns);
     const float SafePadding = FMath::Clamp(HiddenNodeEdgePaddingUV, 0.f, 0.45f);
     const float Span = FMath::Max(UE_KINDA_SMALL_NUMBER, 1.f - SafePadding * 2.f);
 
-    const float NormalizedColumn = (UV.X - SafePadding) / Span;
-    const float NormalizedRow = (UV.Y - SafePadding) / Span;
+    const float NormalizedColumn = (AreaUV.X - SafePadding) / Span;
+    const float NormalizedRow = (AreaUV.Y - SafePadding) / Span;
     if (NormalizedColumn < 0.f || NormalizedColumn > 1.f || NormalizedRow < 0.f || NormalizedRow > 1.f)
     {
         return INDEX_NONE;
@@ -439,16 +605,37 @@ int32 APickupActorAAARuneCanvasInstrument::ResolveHiddenNodeFromUV(const FVector
         ? 0
         : FMath::RoundToInt(NormalizedRow * static_cast<float>(SafeRows - 1));
 
-    const FVector2D NodeUV(
+    const FVector2D AreaNodeUV(
         SafeColumns == 1 ? 0.5f : SafePadding + (static_cast<float>(ColumnIndex) / static_cast<float>(SafeColumns - 1)) * Span,
         SafeRows == 1 ? 0.5f : SafePadding + (static_cast<float>(RowIndex) / static_cast<float>(SafeRows - 1)) * Span);
 
-    if (FVector2D::DistSquared(UV, NodeUV) > FMath::Square(HiddenNodeHitRadiusUV))
+    if (FVector2D::DistSquared(AreaUV, AreaNodeUV) > FMath::Square(HiddenNodeHitRadiusUV))
     {
         return INDEX_NONE;
     }
 
-    return RowIndex * SafeColumns + ColumnIndex + 1;
+    return GetHiddenNodeId(RowIndex, ColumnIndex);
+}
+
+bool APickupActorAAARuneCanvasInstrument::GetHiddenNodeCoordinatesForId(
+    int32 NodeId,
+    int32& OutRow,
+    int32& OutColumn) const
+{
+    OutRow = INDEX_NONE;
+    OutColumn = INDEX_NONE;
+
+    const int32 SafeRows = FMath::Max(1, HiddenNodeRows);
+    const int32 SafeColumns = FMath::Max(1, HiddenNodeColumns);
+    const int32 ZeroBasedNodeId = NodeId - 1;
+    if (ZeroBasedNodeId < 0)
+    {
+        return false;
+    }
+
+    OutRow = ZeroBasedNodeId / SafeColumns;
+    OutColumn = ZeroBasedNodeId % SafeColumns;
+    return OutRow >= 0 && OutRow < SafeRows && OutColumn >= 0 && OutColumn < SafeColumns;
 }
 
 void APickupActorAAARuneCanvasInstrument::TryAppendRecognizedNode(int32 NodeId)
@@ -458,19 +645,119 @@ void APickupActorAAARuneCanvasInstrument::TryAppendRecognizedNode(int32 NodeId)
         return;
     }
 
-    if (RecognizedNodeSequence.Num() > 0 && RecognizedNodeSequence.Last() == NodeId)
+    if (RecognizedNodeSequence.Num() == 0 || !bInterpolateSkippedRecognitionNodes)
+    {
+        TryAppendSingleRecognizedNode(NodeId);
+        return;
+    }
+
+    const int32 LastNodeId = RecognizedNodeSequence.Last();
+    if (LastNodeId == NodeId)
     {
         return;
+    }
+
+    AppendInterpolatedNodesBetween(LastNodeId, NodeId);
+}
+
+bool APickupActorAAARuneCanvasInstrument::TryAppendSingleRecognizedNode(int32 NodeId)
+{
+    if (NodeId == INDEX_NONE)
+    {
+        return false;
+    }
+
+    if (RecognizedNodeSequence.Num() > 0 && RecognizedNodeSequence.Last() == NodeId)
+    {
+        return false;
     }
 
     if (!bAllowNodeRepeat && RecognizedNodeSequence.Contains(NodeId))
     {
-        return;
+        return false;
     }
 
     RecognizedNodeSequence.Add(NodeId);
     ReceiveRuneCanvasNodeSequenceChanged(RecognizedNodeSequence, NodeId);
+    return true;
 }
+
+void APickupActorAAARuneCanvasInstrument::AppendInterpolatedNodesBetween(int32 FromNodeId, int32 ToNodeId)
+{
+    int32 FromRow = INDEX_NONE;
+    int32 FromColumn = INDEX_NONE;
+    int32 ToRow = INDEX_NONE;
+    int32 ToColumn = INDEX_NONE;
+
+    if (!GetHiddenNodeCoordinatesForId(FromNodeId, FromRow, FromColumn)
+        || !GetHiddenNodeCoordinatesForId(ToNodeId, ToRow, ToColumn))
+    {
+        TryAppendSingleRecognizedNode(ToNodeId);
+        return;
+    }
+
+    int32 CurrentColumn = FromColumn;
+    int32 CurrentRow = FromRow;
+    const int32 DeltaColumn = FMath::Abs(ToColumn - FromColumn);
+    const int32 DeltaRow = FMath::Abs(ToRow - FromRow);
+    const int32 StepColumn = FromColumn < ToColumn ? 1 : -1;
+    const int32 StepRow = FromRow < ToRow ? 1 : -1;
+    int32 Error = DeltaColumn - DeltaRow;
+
+    while (!(CurrentColumn == ToColumn && CurrentRow == ToRow))
+    {
+        const int32 DoubleError = Error * 2;
+        if (DoubleError > -DeltaRow)
+        {
+            Error -= DeltaRow;
+            CurrentColumn += StepColumn;
+        }
+        if (DoubleError < DeltaColumn)
+        {
+            Error += DeltaColumn;
+            CurrentRow += StepRow;
+        }
+
+        const int32 InterpolatedNodeId = GetHiddenNodeId(CurrentRow, CurrentColumn);
+        if (InterpolatedNodeId != INDEX_NONE)
+        {
+            TryAppendSingleRecognizedNode(InterpolatedNodeId);
+        }
+    }
+}
+
+FString APickupActorAAARuneCanvasInstrument::BuildRecognizedNodeSequenceString() const
+{
+    FString Result;
+    for (int32 Index = 0; Index < RecognizedNodeSequence.Num(); ++Index)
+    {
+        if (Index > 0)
+        {
+            Result += TEXT(", ");
+        }
+        Result += FString::FromInt(RecognizedNodeSequence[Index]);
+    }
+    return Result;
+}
+
+void APickupActorAAARuneCanvasInstrument::LogRecognizedNodeSequence(const TCHAR* Context) const
+{
+    if (!bLogRecognizedNodeSequence)
+    {
+        return;
+    }
+
+    UE_LOG(
+        LogTemp,
+        Warning,
+        TEXT("%s RuneCanvas %s nodes: [%s], Solved: %s, Pattern: %s"),
+        *GetName(),
+        Context,
+        *BuildRecognizedNodeSequenceString(),
+        bPatternSolved ? TEXT("true") : TEXT("false"),
+        *SolvedPatternId.ToString());
+}
+
 
 bool APickupActorAAARuneCanvasInstrument::TryResolveAcceptedPattern(
     const TArray<int32>& NodeSequence,
@@ -485,7 +772,32 @@ bool APickupActorAAARuneCanvasInstrument::TryResolveAcceptedPattern(
             continue;
         }
 
-        if (Pattern.NodeSequence == NodeSequence)
+        if (bRequireExactPatternMatch)
+        {
+            if (Pattern.NodeSequence == NodeSequence)
+            {
+                OutPatternId = Pattern.PatternId;
+                return true;
+            }
+            continue;
+        }
+
+        if (NodeSequence.Num() < Pattern.NodeSequence.Num())
+        {
+            continue;
+        }
+
+        bool bMatches = true;
+        for (int32 Index = 0; Index < Pattern.NodeSequence.Num(); ++Index)
+        {
+            if (NodeSequence[Index] != Pattern.NodeSequence[Index])
+            {
+                bMatches = false;
+                break;
+            }
+        }
+
+        if (bMatches)
         {
             OutPatternId = Pattern.PatternId;
             return true;

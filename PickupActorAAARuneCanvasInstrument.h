@@ -88,6 +88,9 @@ public:
         return DrawnUVPoints;
     }
 
+    UFUNCTION(BlueprintPure, Category = "RuneCanvas|Recognition")
+    int32 GetHiddenNodeId(int32 Row, int32 Column) const;
+
     UFUNCTION(BlueprintPure, Category = "RuneCanvas|RenderTarget")
     UTextureRenderTarget2D* GetDrawRenderTarget() const
     {
@@ -128,6 +131,9 @@ protected:
     int32 DrawTextureResolution = 1024;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|RenderTarget")
+    bool bMatchDrawTextureAspectToSurface = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|RenderTarget")
     FLinearColor DrawTextureClearColor = FLinearColor::Transparent;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|RenderTarget")
@@ -148,11 +154,32 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Draw", meta = (ClampMin = "1.0", ClampMax = "128.0"))
     float StrokeThicknessPixels = 10.f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Draw")
+    bool bCompensateStrokeAspectRatio = true;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Draw", meta = (ClampMin = "0.0001", ClampMax = "0.25"))
     float MinDrawPointDistanceUV = 0.004f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Recognition")
     bool bEnableHiddenNodeRecognition = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Recognition|Area", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    FVector2D RecognitionAreaCenterUV = FVector2D(0.5f, 0.5f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Recognition|Area", meta = (ClampMin = "0.01", ClampMax = "1.0"))
+    FVector2D RecognitionAreaSizeUV = FVector2D(1.f, 1.f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Recognition|Area")
+    bool bRestrictDrawingToRecognitionArea = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Recognition|Debug")
+    bool bDrawRecognitionGridGuide = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Recognition|Debug")
+    FLinearColor RecognitionGridGuideColor = FLinearColor(0.15f, 0.85f, 1.f, 0.45f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Recognition|Debug", meta = (ClampMin = "1.0", ClampMax = "16.0"))
+    float RecognitionGridGuideThicknessPixels = 2.f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Recognition", meta = (ClampMin = "1", UIMin = "1"))
     int32 HiddenNodeRows = 5;
@@ -168,6 +195,15 @@ protected:
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Recognition")
     bool bAllowNodeRepeat = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Recognition")
+    bool bInterpolateSkippedRecognitionNodes = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Recognition")
+    bool bRequireExactPatternMatch = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Recognition|Debug")
+    bool bLogRecognizedNodeSequence = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Patterns", meta = (TitleProperty = "PatternId"))
     TArray<FRuneCanvasPattern> AcceptedPatterns;
@@ -198,11 +234,20 @@ private:
     bool EnsureDrawResources();
     void EnableMouseTraceCollisionIfNeeded();
     void RestoreHeldCollisionAfterMouseTrace();
+    bool IsUVInsideRecognitionArea(const FVector2D& UV) const;
+    FVector2D NormalizeUVToRecognitionArea(const FVector2D& UV) const;
+    FVector2D DenormalizeRecognitionAreaUV(const FVector2D& AreaUV) const;
+    void DrawRecognitionGridGuide();
     bool ResolveDrawUVFromMouseTrace(APlayerController* UsingController, const FVector2D& ScreenPosition, FVector2D& OutUV) const;
     bool ResolveDrawUVFromScreenPosition(APlayerController* UsingController, const FVector2D& ScreenPosition, FVector2D& OutUV) const;
     void AddDrawPoint(const FVector2D& UV);
     void DrawStrokeSegment(const FVector2D& StartUV, const FVector2D& EndUV);
     int32 ResolveHiddenNodeFromUV(const FVector2D& UV) const;
+    bool GetHiddenNodeCoordinatesForId(int32 NodeId, int32& OutRow, int32& OutColumn) const;
     void TryAppendRecognizedNode(int32 NodeId);
+    bool TryAppendSingleRecognizedNode(int32 NodeId);
+    void AppendInterpolatedNodesBetween(int32 FromNodeId, int32 ToNodeId);
+    FString BuildRecognizedNodeSequenceString() const;
+    void LogRecognizedNodeSequence(const TCHAR* Context) const;
     bool TryResolveAcceptedPattern(const TArray<int32>& NodeSequence, FName& OutPatternId) const;
 };
