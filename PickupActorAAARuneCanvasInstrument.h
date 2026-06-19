@@ -49,6 +49,9 @@ public:
     UFUNCTION(BlueprintCallable, Category = "RuneCanvas")
     void ResetRuneState();
 
+    UFUNCTION(BlueprintCallable, Category = "RuneCanvas")
+    void CommitRuneSequenceAuthority(const TArray<int32>& NodeSequence, AActor* SolvingActor);
+
     UFUNCTION(BlueprintCallable, Category = "RuneCanvas|RenderTarget")
     void ClearDrawTexture();
 
@@ -100,7 +103,25 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Surface")
     FVector2D DrawSurfaceSize = FVector2D(20.f, 20.f);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Surface")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Surface", meta = (ClampMin = "0.05", ClampMax = "4.0", DisplayName = "Draw UV Sensitivity"))
+    FVector2D DrawUVSensitivity = FVector2D(1.f, 1.f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Surface|MouseTrace")
+    bool bUseMouseTraceCollisionUV = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Surface|MouseTrace", meta = (ClampMin = "100.0"))
+    float MouseTraceDistance = 5000.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Surface|MouseTrace", meta = (ClampMin = "0", UIMin = "0"))
+    int32 MouseTraceUVChannel = 0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Surface", meta = (DisplayName = "Swap Draw Surface Axes"))
+    bool bSwapDrawSurfaceAxes = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Surface", meta = (DisplayName = "Invert Draw U"))
+    bool bInvertDrawU = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Surface", meta = (DisplayName = "Invert Draw V"))
     bool bInvertDrawW = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|RenderTarget", meta = (ClampMin = "64", ClampMax = "4096"))
@@ -175,6 +196,9 @@ private:
     FName SolvedPatternId = NAME_None;
 
     bool EnsureDrawResources();
+    void EnableMouseTraceCollisionIfNeeded();
+    void RestoreHeldCollisionAfterMouseTrace();
+    bool ResolveDrawUVFromMouseTrace(APlayerController* UsingController, const FVector2D& ScreenPosition, FVector2D& OutUV) const;
     bool ResolveDrawUVFromScreenPosition(APlayerController* UsingController, const FVector2D& ScreenPosition, FVector2D& OutUV) const;
     void AddDrawPoint(const FVector2D& UV);
     void DrawStrokeSegment(const FVector2D& StartUV, const FVector2D& EndUV);

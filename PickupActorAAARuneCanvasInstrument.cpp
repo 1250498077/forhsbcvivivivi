@@ -5,6 +5,7 @@
 #include "Engine/Canvas.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "GameFramework/PlayerController.h"
+#include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetRenderingLibrary.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
@@ -86,6 +87,7 @@ bool APickupActorAAARuneCanvasInstrument::BeginRuneDraw(APlayerController* Using
     SolvedPatternId = NAME_None;
     DrawnUVPoints.Reset();
     RecognizedNodeSequence.Reset();
+    EnableMouseTraceCollisionIfNeeded();
 
     if (bClearTextureOnBeginDraw)
     {
@@ -130,15 +132,11 @@ TArray<int32> APickupActorAAARuneCanvasInstrument::EndRuneDraw(APlayerController
     }
 
     bRuneDrawActive = false;
+    RestoreHeldCollisionAfterMouseTrace();
     SolvedPatternId = NAME_None;
     bPatternSolved = TryResolveAcceptedPattern(RecognizedNodeSequence, SolvedPatternId);
 
     ReceiveRuneCanvasDrawStateChanged(DrawnUVPoints, false);
-
-    if (bPatternSolved)
-    {
-        ReceiveRuneCanvasPatternSolved(SolvedPatternId, UsingController ? UsingController->GetPawn() : nullptr);
-    }
 
     return RecognizedNodeSequence;
 }
@@ -146,6 +144,7 @@ TArray<int32> APickupActorAAARuneCanvasInstrument::EndRuneDraw(APlayerController
 void APickupActorAAARuneCanvasInstrument::ResetRuneState()
 {
     bRuneDrawActive = false;
+    RestoreHeldCollisionAfterMouseTrace();
     bPatternSolved = false;
     SolvedPatternId = NAME_None;
     DrawnUVPoints.Reset();
@@ -153,6 +152,31 @@ void APickupActorAAARuneCanvasInstrument::ResetRuneState()
     ClearDrawTexture();
     ReceiveRuneCanvasDrawStateChanged(DrawnUVPoints, false);
     ReceiveRuneCanvasNodeSequenceChanged(RecognizedNodeSequence, INDEX_NONE);
+}
+
+void APickupActorAAARuneCanvasInstrument::CommitRuneSequenceAuthority(
+    const TArray<int32>& NodeSequence,
+    AActor* SolvingActor)
+{
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    bRuneDrawActive = false;
+    RecognizedNodeSequence = NodeSequence;
+    SolvedPatternId = NAME_None;
+    bPatternSolved = TryResolveAcceptedPattern(RecognizedNodeSequence, SolvedPatternId);
+
+    ReceiveRuneCanvasDrawStateChanged(DrawnUVPoints, false);
+    ReceiveRuneCanvasNodeSequenceChanged(
+    RecognizedNodeSequence,
+    RecognizedNodeSequence.Num() > 0 ? RecognizedNodeSequence.Last() : INDEX_NONE);
+
+    if (bPatternSolved)
+    {
+        ReceiveRuneCanvasPatternSolved(SolvedPatternId, SolvingActor);
+    }
 }
 
 void APickupActorAAARuneCanvasInstrument::ClearDrawTexture()
@@ -170,6 +194,32 @@ void APickupActorAAARuneCanvasInstrument::ReinitializeDrawResources()
     EnsureDrawResources();
     ClearDrawTexture();
 }
+
+void APickupActorAAARuneCanvasInstrument::EnableMouseTraceCollisionIfNeeded()
+{
+    if (!bUseMouseTraceCollisionUV || !MeshComponent)
+    {
+        return;
+    }
+
+    MeshComponent->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+    MeshComponent->SetCollisionResponseToAllChannels(ECR_Ignore);
+    MeshComponent->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+    MeshComponent->SetGenerateOverlapEvents(false);
+}
+
+void APickupActorAAARuneCanvasInstrument::RestoreHeldCollisionAfterMouseTrace()
+{
+    if (!bUseMouseTraceCollisionUV || !bIsHeldByPlayer || !MeshComponent)
+    {
+        return;
+    }
+
+    MeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    MeshComponent->SetCollisionResponseToAllChannels(ECR_Ignore);
+    MeshComponent->SetGenerateOverlapEvents(false);
+}
+
 
 bool APickupActorAAARuneCanvasInstrument::GetPreferredDrawStartScreenPosition(
     APlayerController* PC,
@@ -223,6 +273,11 @@ bool APickupActorAAARuneCanvasInstrument::ResolveDrawUVFromScreenPosition(
         return false;
     }
 
+    if (bUseMouseTraceCollisionUV && ResolveDrawUVFromMouseTrace(UsingController, ScreenPosition, OutUV))
+    {
+        return true;
+    }
+
     FVector RayOrigin = FVector::ZeroVector;
     FVector RayDirection = FVector::ZeroVector;
     if (!UsingController->DeprojectScreenPositionToWorld(ScreenPosition.X, ScreenPosition.Y, RayOrigin, RayDirection))
@@ -250,9 +305,14 @@ bool APickupActorAAARuneCanvasInstrument::ResolveDrawUVFromScreenPosition(
     const float SafeWidth = FMath::Max(UE_KINDA_SMALL_NUMBER, DrawSurfaceSize.X);
     const float SafeHeight = FMath::Max(UE_KINDA_SMALL_NUMBER, DrawSurfaceSize.Y);
 
-    const float U = (LocalHitLocation.Y / SafeWidth) + 0.5f;
-    const float RawW = (LocalHitLocation.X / SafeHeight) + 0.5f;
-    const float V = bInvertDrawW ? 1.f - RawW : RawW;
+    const float SurfaceHorizontal = bSwapDrawSurfaceAxes ? LocalHitLocation.X : LocalHitLocation.Y;
+    const float SurfaceVertical = bSwapDrawSurfaceAxes ? LocalHitLocation.Y : LocalHitLocation.X;
+    const float RawU = (SurfaceHorizontal / SafeWidth) + 0.5f;
+    const float RawV = (SurfaceVertical / SafeHeight) + 0.5f;
+    const float MappedU = bInvertDrawU ? 1.f - RawU : RawU;
+    const float MappedV = bInvertDrawW ? 1.f - RawV : RawV;
+    const float U = 0.5f + (MappedU - 0.5f) * DrawUVSensitivity.X;
+    const float V = 0.5f + (MappedV - 0.5f) * DrawUVSensitivity.Y;
 
     if (U < 0.f || U > 1.f || V < 0.f || V > 1.f)
     {
@@ -261,6 +321,64 @@ bool APickupActorAAARuneCanvasInstrument::ResolveDrawUVFromScreenPosition(
 
     OutUV = FVector2D(U, V);
     return true;
+}
+
+bool APickupActorAAARuneCanvasInstrument::ResolveDrawUVFromMouseTrace(
+    APlayerController* UsingController,
+    const FVector2D& ScreenPosition,
+    FVector2D& OutUV) const
+{
+    OutUV = FVector2D::ZeroVector;
+    if (!UsingController || !MeshComponent)
+    {
+        return false;
+    }
+
+    FVector RayOrigin = FVector::ZeroVector;
+    FVector RayDirection = FVector::ZeroVector;
+    if (!UsingController->DeprojectScreenPositionToWorld(ScreenPosition.X, ScreenPosition.Y, RayOrigin, RayDirection))
+    {
+        return false;
+    }
+
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return false;
+    }
+
+    FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(RuneCanvasMouseTrace), true);
+    QueryParams.bReturnFaceIndex = true;
+    if (APawn* Pawn = UsingController->GetPawn())
+    {
+        QueryParams.AddIgnoredActor(Pawn);
+    }
+
+    TArray<FHitResult> HitResults;
+    const FVector RayEnd = RayOrigin + RayDirection.GetSafeNormal() * FMath::Max(100.f, MouseTraceDistance);
+    if (!World->LineTraceMultiByChannel(HitResults, RayOrigin, RayEnd, ECC_Visibility, QueryParams))
+    {
+        return false;
+    }
+
+    for (const FHitResult& HitResult : HitResults)
+    {
+        const UActorComponent* HitComponent = HitResult.GetComponent();
+        // 确保击中点属于当前 Actor 或其组件
+        if (HitResult.GetActor() != this && (!HitComponent || HitComponent->GetOwner() != this))
+        {
+            continue;
+        }
+
+        FVector2D CollisionUV = FVector2D::ZeroVector;
+        if (UGameplayStatics::FindCollisionUV(HitResult, FMath::Max(0, MouseTraceUVChannel), CollisionUV))
+        {
+            OutUV = CollisionUV;
+            return OutUV.X >= 0.f && OutUV.X <= 1.f && OutUV.Y >= 0.f && OutUV.Y <= 1.f;
+        }
+    }
+
+    return false;
 }
 
 void APickupActorAAARuneCanvasInstrument::AddDrawPoint(const FVector2D& UV)
