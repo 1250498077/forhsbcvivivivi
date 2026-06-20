@@ -104,7 +104,7 @@ protected:
     TObjectPtr<USceneComponent> DrawSurfaceComponent;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Surface")
-    FVector2D DrawSurfaceSize = FVector2D(20.f, 20.f);
+    FVector2D DrawSurfaceSize = FVector2D(60.f, 20.f);
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Surface", meta = (ClampMin = "0.05", ClampMax = "4.0", DisplayName = "Draw UV Sensitivity"))
     FVector2D DrawUVSensitivity = FVector2D(1.f, 1.f);
