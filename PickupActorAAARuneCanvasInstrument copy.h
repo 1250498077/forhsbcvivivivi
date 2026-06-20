@@ -8,8 +8,6 @@ class APlayerController;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
 class USceneComponent;
-class UStaticMesh;
-class UStaticMeshComponent;
 class UTextureRenderTarget2D;
 
 USTRUCT(BlueprintType)
@@ -127,7 +125,7 @@ protected:
     bool bInvertDrawU = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Surface", meta = (DisplayName = "Invert Draw V"))
-    bool bInvertDrawV = true;
+    bool bInvertDrawW = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|RenderTarget", meta = (ClampMin = "64", ClampMax = "4096"))
     int32 DrawTextureResolution = 1024;
@@ -178,27 +176,6 @@ protected:
     bool bDrawRecognitionGridGuide = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Recognition|Debug")
-    bool bShowRecognitionGridPreview = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Recognition|Debug")
-    bool bShowDrawSurfacePreview = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Recognition|Debug", meta = (ClampMin = "0.01"))
-    float DrawSurfacePreviewBorderThickness = 0.25f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Recognition|Debug", meta = (ClampMin = "0.001"))
-    FVector RecognitionGridPreviewNodeScale = FVector(0.012f, 0.012f, 0.012f);
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Recognition|Debug")
-    TObjectPtr<UStaticMesh> RecognitionGridPreviewNodeMesh = nullptr;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Recognition|Debug")
-    TObjectPtr<UMaterialInterface> RecognitionGridPreviewMaterial = nullptr;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Recognition|Debug")
-    TObjectPtr<UMaterialInterface> DrawSurfacePreviewMaterial = nullptr;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Recognition|Debug")
     FLinearColor RecognitionGridGuideColor = FLinearColor(0.15f, 0.85f, 1.f, 0.45f);
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Recognition|Debug", meta = (ClampMin = "1.0", ClampMax = "16.0"))
@@ -247,12 +224,6 @@ private:
     UPROPERTY(Transient)
     TObjectPtr<UMaterialInstanceDynamic> CardDynamicMaterial = nullptr;
 
-    UPROPERTY(Transient)
-    TObjectPtr<UStaticMesh> DefaultRecognitionGridPreviewNodeMesh = nullptr;
-
-    UPROPERTY(Transient)
-    TArray<TObjectPtr<UStaticMeshComponent>> RecognitionGridPreviewComponents;
-
     TArray<FVector2D> DrawnUVPoints;
     TArray<int32> RecognizedNodeSequence;
 
@@ -267,10 +238,7 @@ private:
     bool IsUVInsideRecognitionArea(const FVector2D& UV) const;
     FVector2D NormalizeUVToRecognitionArea(const FVector2D& UV) const;
     FVector2D DenormalizeRecognitionAreaUV(const FVector2D& AreaUV) const;
-    FVector GetDrawSurfaceLocalLocationFromUV(const FVector2D& UV) const;
     void DrawRecognitionGridGuide();
-    void RebuildRecognitionGridPreview();
-    void ClearRecognitionGridPreview();
     bool ResolveDrawUVFromMouseTrace(APlayerController* UsingController, const FVector2D& ScreenPosition, FVector2D& OutUV) const;
     bool ResolveDrawUVFromScreenPosition(APlayerController* UsingController, const FVector2D& ScreenPosition, FVector2D& OutUV) const;
     bool ResolveDrawUVFromWorldLocation(const FVector& WorldLocation, FVector2D& OutUV) const;

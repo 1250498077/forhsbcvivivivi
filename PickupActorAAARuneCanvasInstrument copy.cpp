@@ -9,7 +9,6 @@
 #include "Kismet/KismetRenderingLibrary.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
-#include "UObject/ConstructorHelpers.h"
 
 APickupActorAAARuneCanvasInstrument::APickupActorAAARuneCanvasInstrument()
 {
@@ -35,32 +34,23 @@ APickupActorAAARuneCanvasInstrument::APickupActorAAARuneCanvasInstrument()
 
     DrawSurfaceComponent = CreateDefaultSubobject<USceneComponent>(TEXT("DrawSurfaceComponent"));
     DrawSurfaceComponent->SetupAttachment(VisualMeshRootComponent);
-
-    static ConstructorHelpers::FObjectFinder<UStaticMesh> DefaultPlaneMesh(TEXT("/Engine/BasicShapes/Plane.Plane"));
-    if (DefaultPlaneMesh.Succeeded())
-    {
-        DefaultRecognitionGridPreviewNodeMesh = DefaultPlaneMesh.Object;
-        RecognitionGridPreviewNodeMesh = DefaultPlaneMesh.Object;
-    }
 }
 
 void APickupActorAAARuneCanvasInstrument::BeginPlay()
 {
     Super::BeginPlay();
-    RebuildRecognitionGridPreview();
     EnsureDrawResources();
 }
 
 void APickupActorAAARuneCanvasInstrument::OnConstruction(const FTransform& Transform)
 {
-    Super::OnConstruction(Transform);RebuildRecognitionGridPreview();
+    Super::OnConstruction(Transform);
 }
 
 void APickupActorAAARuneCanvasInstrument::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
     DrawnUVPoints.Reset();
     RecognizedNodeSequence.Reset();
-    ClearRecognitionGridPreview();
     DrawRenderTarget = nullptr;
     CardDynamicMaterial = nullptr;
 
@@ -350,189 +340,6 @@ FVector2D APickupActorAAARuneCanvasInstrument::DenormalizeRecognitionAreaUV(cons
     return AreaMin + FVector2D(AreaUV.X * SafeAreaSize.X, AreaUV.Y * SafeAreaSize.Y);
 }
 
-FVector APickupActorAAARuneCanvasInstrument::GetDrawSurfaceLocalLocationFromUV(const FVector2D& UV) const
-{
-    const float SafeWidth = FMath::Max(UE_KINDA_SMALL_NUMBER, DrawSurfaceSize.X);
-    const float SafeHeight = FMath::Max(UE_KINDA_SMALL_NUMBER, DrawSurfaceSize.Y);
-    const FVector2D SafeSensitivity(
-        FMath::Max(UE_KINDA_SMALL_NUMBER, DrawUVSensitivity.X),
-        FMath::Max(UE_KINDA_SMALL_NUMBER, DrawUVSensitivity.Y));
-
-    const float MappedU = ((UV.X - 0.5f) / SafeSensitivity.X) + 0.5f;
-    const float MappedV = ((UV.Y - 0.5f) / SafeSensitivity.Y) + 0.5f;
-    const float RawU = bInvertDrawU ? 1.f - MappedU : MappedU;
-    const float RawV = bInvertDrawV ? 1.f - MappedV : MappedV;
-    const float SurfaceHorizontal = (RawU - 0.5f) * SafeWidth;
-    const float SurfaceVertical = (RawV - 0.5f) * SafeHeight;
-
-    return bSwapDrawSurfaceAxes
-        ? FVector(SurfaceHorizontal, SurfaceVertical, 0.1f)
-        : FVector(SurfaceVertical, SurfaceHorizontal, 0.1f);
-}
-
-void APickupActorAAARuneCanvasInstrument::RebuildRecognitionGridPreview()
-{
-    ClearRecognitionGridPreview();
-
-    const bool bShouldShowNodePreview = bShowRecognitionGridPreview || bDrawRecognitionGridGuide;
-    const bool bShouldShowSurfacePreview = bShowDrawSurfacePreview || bShouldShowNodePreview;
-
-    if ((!bShouldShowNodePreview && !bShouldShowSurfacePreview) || !DrawSurfaceComponent)
-    {
-        return;
-    }
-
-    UStaticMesh* PreviewMesh = RecognitionGridPreviewNodeMesh
-        ? RecognitionGridPreviewNodeMesh.Get()
-        : DefaultRecognitionGridPreviewNodeMesh.Get();
-    if (!PreviewMesh)
-    {
-        return;
-    }
-
-    if (bShouldShowSurfacePreview)
-    {
-        const FVector SurfaceMin = GetDrawSurfaceLocalLocationFromUV(FVector2D::ZeroVector);
-        const FVector SurfaceMax = GetDrawSurfaceLocalLocationFromUV(FVector2D(1.f, 1.f));
-        const float MinX = FMath::Min(SurfaceMin.X, SurfaceMax.X);
-        const float MaxX = FMath::Max(SurfaceMin.X, SurfaceMax.X);
-        const float MinY = FMath::Min(SurfaceMin.Y, SurfaceMax.Y);
-        const float MaxY = FMath::Max(SurfaceMin.Y, SurfaceMax.Y);
-        const float CenterX = (MinX + MaxX) * 0.5f;
-        const float CenterY = (MinY + MaxY) * 0.5f;
-        const float SizeX = FMath::Max(UE_KINDA_SMALL_NUMBER, MaxX - MinX);
-        const float SizeY = FMath::Max(UE_KINDA_SMALL_NUMBER, MaxY - MinY);
-        const float BorderThickness = FMath::Max(0.01f, DrawSurfacePreviewBorderThickness);
-
-        const TArray<TPair<FVector, FVector>> BorderTransforms = {
-            TPair<FVector, FVector>(FVector(MinX, CenterY, 0.12f), FVector(BorderThickness / 100.f, SizeY / 100.f, 1.f)),
-            TPair<FVector, FVector>(FVector(MaxX, CenterY, 0.12f), FVector(BorderThickness / 100.f, SizeY / 100.f, 1.f)),
-            TPair<FVector, FVector>(FVector(CenterX, MinY, 0.12f), FVector(SizeX / 100.f, BorderThickness / 100.f, 1.f)),
-            TPair<FVector, FVector>(FVector(CenterX, MaxY, 0.12f), FVector(SizeX / 100.f, BorderThickness / 100.f, 1.f))
-        };
-
-        for (int32 BorderIndex = 0; BorderIndex < BorderTransforms.Num(); ++BorderIndex)
-        {
-            const FName ComponentName = *FString::Printf(TEXT("rune_canvas_preview_surface_border_%d"), BorderIndex);
-            UStaticMeshComponent* BorderComponent = NewObject<UStaticMeshComponent>(this, ComponentName);
-            if (!BorderComponent)
-            {
-                continue;
-            }
-
-            BorderComponent->ComponentTags.Add(FName("GeneratedRuneCanvasRecognitionPreview"));
-            BorderComponent->SetupAttachment(DrawSurfaceComponent);
-            BorderComponent->SetMobility(EComponentMobility::Movable);
-            BorderComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-            BorderComponent->SetGenerateOverlapEvents(false);
-            BorderComponent->SetCanEverAffectNavigation(false);
-            BorderComponent->SetCastShadow(false);
-            BorderComponent->SetHiddenInGame(false);
-            BorderComponent->SetStaticMesh(PreviewMesh);
-            BorderComponent->SetRelativeLocation(BorderTransforms[BorderIndex].Key);
-            BorderComponent->SetRelativeRotation(FRotator::ZeroRotator);
-            BorderComponent->SetRelativeScale3D(BorderTransforms[BorderIndex].Value);
-            BorderComponent->RegisterComponent();
-
-            UMaterialInterface* BorderMaterial = DrawSurfacePreviewMaterial
-                ? DrawSurfacePreviewMaterial.Get()
-                : RecognitionGridPreviewMaterial.Get();
-            if (BorderMaterial)
-            {
-                BorderComponent->SetMaterial(0, BorderMaterial);
-            }
-
-            RecognitionGridPreviewComponents.Add(BorderComponent);
-        }
-    }
-
-    if (!bShouldShowNodePreview)
-    {
-        return;
-    }
-
-    const int32 SafeRows = FMath::Max(1, HiddenNodeRows);
-    const int32 SafeColumns = FMath::Max(1, HiddenNodeColumns);
-    const float SafePadding = FMath::Clamp(HiddenNodeEdgePaddingUV, 0.f, 0.45f);
-    const float Span = FMath::Max(UE_KINDA_SMALL_NUMBER, 1.f - SafePadding * 2.f);
-
-    for (int32 RowIndex = 0; RowIndex < SafeRows; ++RowIndex)
-    {
-        for (int32 ColumnIndex = 0; ColumnIndex < SafeColumns; ++ColumnIndex)
-        {
-            const int32 NodeId = GetHiddenNodeId(RowIndex, ColumnIndex);
-            const FName ComponentName = *FString::Printf(TEXT("rune_canvas_preview_node_%d"), NodeId);
-            UStaticMeshComponent* PreviewComponent = NewObject<UStaticMeshComponent>(this, ComponentName);
-            if (!PreviewComponent)
-            {
-                continue;
-            }
-
-            const FVector2D AreaNodeUV(
-                SafeColumns == 1 ? 0.5f : SafePadding + (static_cast<float>(ColumnIndex) / static_cast<float>(SafeColumns - 1)) * Span,
-                SafeRows == 1 ? 0.5f : SafePadding + (static_cast<float>(RowIndex) / static_cast<float>(SafeRows - 1)) * Span);
-            const FVector2D NodeUV = DenormalizeRecognitionAreaUV(AreaNodeUV);
-
-            PreviewComponent->ComponentTags.Add(FName("GeneratedRuneCanvasRecognitionPreview"));
-            PreviewComponent->SetupAttachment(DrawSurfaceComponent);
-            PreviewComponent->SetMobility(EComponentMobility::Movable);
-            PreviewComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-            PreviewComponent->SetGenerateOverlapEvents(false);
-            PreviewComponent->SetCanEverAffectNavigation(false);
-            PreviewComponent->SetCastShadow(false);
-            PreviewComponent->SetHiddenInGame(false);
-            PreviewComponent->SetStaticMesh(PreviewMesh);
-            PreviewComponent->SetRelativeLocation(GetDrawSurfaceLocalLocationFromUV(NodeUV));
-            PreviewComponent->SetRelativeRotation(FRotator::ZeroRotator);
-            PreviewComponent->SetRelativeScale3D(RecognitionGridPreviewNodeScale);
-            PreviewComponent->RegisterComponent();
-
-            if (RecognitionGridPreviewMaterial)
-            {
-                PreviewComponent->SetMaterial(0, RecognitionGridPreviewMaterial);
-            }
-
-            RecognitionGridPreviewComponents.Add(PreviewComponent);
-        }
-    }
-}
-
-void APickupActorAAARuneCanvasInstrument::ClearRecognitionGridPreview()
-{
-    TArray<UStaticMeshComponent*> ComponentsToDestroy;
-    for (UStaticMeshComponent* PreviewComponent : RecognitionGridPreviewComponents)
-    {
-        if (IsValid(PreviewComponent))
-        {
-            ComponentsToDestroy.Add(PreviewComponent);
-        }
-    }
-
-    if (ComponentsToDestroy.Num() == 0)
-    {
-        TArray<UStaticMeshComponent*> AttachedStaticMeshes;
-        GetComponents<UStaticMeshComponent>(AttachedStaticMeshes);
-        for (UStaticMeshComponent* StaticMeshComponent : AttachedStaticMeshes)
-        {
-            if (IsValid(StaticMeshComponent)
-                && StaticMeshComponent->ComponentHasTag(FName("GeneratedRuneCanvasRecognitionPreview")))
-            {
-                ComponentsToDestroy.Add(StaticMeshComponent);
-            }
-        }
-    }
-
-    for (UStaticMeshComponent* PreviewComponent : ComponentsToDestroy)
-    {
-        if (IsValid(PreviewComponent) && PreviewComponent != MeshComponent)
-        {
-            PreviewComponent->DestroyComponent();
-        }
-    }
-
-    RecognitionGridPreviewComponents.Reset();
-}
-
 void APickupActorAAARuneCanvasInstrument::DrawRecognitionGridGuide()
 {
     if (!bDrawRecognitionGridGuide || !DrawRenderTarget)
@@ -655,7 +462,7 @@ bool APickupActorAAARuneCanvasInstrument::ResolveDrawUVFromWorldLocation(
     const float RawU = (SurfaceHorizontal / SafeWidth) + 0.5f;
     const float RawV = (SurfaceVertical / SafeHeight) + 0.5f;
     const float MappedU = bInvertDrawU ? 1.f - RawU : RawU;
-    const float MappedV = bInvertDrawV ? 1.f - RawV : RawV;
+    const float MappedV = bInvertDrawW ? 1.f - RawV : RawV;
     const float U = 0.5f + (MappedU - 0.5f) * DrawUVSensitivity.X;
     const float V = 0.5f + (MappedV - 0.5f) * DrawUVSensitivity.Y;
 
