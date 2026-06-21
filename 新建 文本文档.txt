@@ -1,39 +1,4 @@
-这张图片展示的是 Unreal Engine（虚幻引擎）动画蓝图中的 AnimGraph（动画图表） 逻辑。它的主要功能是根据输入的旋转数据，依次修改角色骨骼的朝向（通常用于实现“注视”或 LookAt 效果）。
-以下是该结构的详细图形文字描述：
-1. 整体数据流向
-数据流从左侧开始，经过坐标空间转换，进入一系列骨骼修改节点，最后再次转换坐标空间并输出。
-起点：Slot FullBody（全身插槽）
-终点：Output Pose（最终姿态输出）
-2. 节点连接详情
-第一阶段：输入与预处理
-Slot FullBody (Source)
-这是动画序列的输入源。
-输出引脚 Pose 连接到 -> Local To Component 节点的输入。
-Local To Component
-将局部空间的姿态转换为组件空间（Component Space），以便后续统一处理。
-输出引脚 Component Pose 连接到 -> 第一个 Transform (Modify) Bone (Spine2) 的输入。
-第二阶段：骨骼修改链 (核心逻辑)
-这一部分由三个串联的 Transform (Modify) Bone 节点组成，它们依次修改脊柱、脖子和头部的旋转。所有节点的 Alpha 均为 1.0（完全生效），Translation 和 Scale 保持默认值。
-Transform (Modify) Bone [Bone: Spine2]
-作用：修改第二根脊柱骨骼。
-输入 Component Pose：来自上一步 Local To Component。
-输入 Rotation：连接了一个名为 Spine 2Look Rotation 的变量（蓝色线）。
-输出：连接到下一个节点（Neck）。
-Transform (Modify) Bone [Bone: Neck]
-作用：修改颈部骨骼。
-输入 Component Pose：来自上一步 Spine2 节点。
-输入 Rotation：同样连接了 Spine 2Look Rotation 变量。
-输出：连接到下一个节点（Head）。
-Transform (Modify) Bone [Bone: Head]
-作用：修改头部骨骼。
-输入 Component Pose：来自上一步 Neck 节点。
-输入 Rotation：依然连接了 Spine 2Look Rotation 变量。
-输出：连接到最后的转换节点。
-注意： 图中三个修改节点的旋转输入都连接到了同一个变量 Spine 2Look Rotation。这通常意味着这三个部位会应用相同的旋转增量，或者这是一个简化的示意图。
-第三阶段：输出处理
-Component To Local
-将处理完的组件空间姿态转换回局部空间（Local Space），这是输出_pose_通常需要的格式。
-输入：来自最后一个 Transform (Modify) Bone (Head) 的输出。
-Output Pose (Result)
-接收最终结果并输出给渲染管线。
-输入 Result：来自 Component To Local。
+UHT compiled-in object format Default
+  Parsing headers for kongbuEditor
+    Running Internal UnrealHeaderTool D:\game\kongbu\kongbu.uproject D:\game\kongbu\Intermediate\Build\Win64\kongbuEditor\Development\kongbuEditor.uhtmanifest -WarningsAsErrors -installed
+  D:\game\kongbu\Source\kongbu\Public\PickupActorAAARuneCanvasInstrument.h(448): Error: The type 'TArray<TObjectPtr<UStaticMeshComponent>>' can not be used as a value in a TMap
