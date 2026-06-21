@@ -9,6 +9,7 @@
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetRenderingLibrary.h"
@@ -17,12 +18,26 @@
 #include "PhysicsEngine/BodyInstance.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "CollisionShape.h"
+#include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
 
 namespace
 {
     const FString CardResourceScanPath = TEXT("/Game/item/canvas/cardtype");
     const FString CardResourcePrefix = TEXT("card_resource_");
+    TMap<uint32, TSet<FString>> BrokenCanvasLinkEdgeKeysByWorld;
+
+    TSet<FString> &GetBrokenCanvasLinkEdgeKeysForWorld(const UWorld *World)
+    {
+        static TSet<FString> EmptyBrokenEdgeKeys;
+        if (!World)
+        {
+            EmptyBrokenEdgeKeys.Reset();
+            return EmptyBrokenEdgeKeys;
+        }
+
+        return BrokenCanvasLinkEdgeKeysByWorld.FindOrAdd(World->GetUniqueID());
+    }
 
     const TArray<TArray<int32>> &GetHardcodedCardExpectedSequences()
     {
@@ -99,7 +114,7 @@ namespace
 
     FVector GetCanvasLinkAnchorLocation(const APickupActorAAARuneCanvasInstrument *Canvas)
     {
-        return IsValid(Canvas) ? Canvas->GetActorLocation() : FVector::ZeroVector;
+        return IsValid(Canvas) ? Canvas->GetCanvasLinkAnchorWorldLocation() : FVector::ZeroVector;
     }
 
     float GetEffectiveCanvasLinkDistance(
@@ -128,6 +143,58 @@ namespace
 
         return FVector::DistSquared(GetCanvasLinkAnchorLocation(A), GetCanvasLinkAnchorLocation(B)) <= FMath::Square(GetEffectiveCanvasLinkDistance(A, B));
     }
+
+    FString BuildCanvasLinkEdgeKey(const APickupActorAAARuneCanvasInstrument *A, const APickupActorAAARuneCanvasInstrument *B)
+    {
+        if (!IsValid(A) || !IsValid(B))
+        {
+            return FString();
+        }
+
+        const FString FirstPath = A->GetPathName();
+        const FString SecondPath = B->GetPathName();
+        return FirstPath < SecondPath
+                ? FirstPath + TEXT("|") + SecondPath
+                : SecondPath + TEXT("|") + FirstPath;
+    }
+
+    bool IsCanvasLinkEdgeBroken(const APickupActorAAARuneCanvasInstrument *A, const APickupActorAAARuneCanvasInstrument *B)
+    {
+        return IsValid(A) && GetBrokenCanvasLinkEdgeKeysForWorld(A->GetWorld()).Contains(BuildCanvasLinkEdgeKey(A, B));
+    }
+
+    bool IsCanvasPathPartOfEdgeKey(const FString &EdgeKey, const FString &CanvasPath)
+    {
+        FString FirstPath;
+        FString SecondPath;
+        if (!EdgeKey.Split(TEXT("|"), &FirstPath, &SecondPath))
+        {
+            return false;
+        }
+
+        return FirstPath == CanvasPath || SecondPath == CanvasPath;
+    }
+
+    bool HasAnyUnbrokenCanvasLink(const APickupActorAAARuneCanvasInstrument *Canvas, const TArray<APickupActorAAARuneCanvasInstrument *> &AllCanvases)
+    {
+        if (!IsValid(Canvas) || !Canvas->CanParticipateInCanvasLinks())
+        {
+            return false;
+        }
+
+        for (const APickupActorAAARuneCanvasInstrument *Candidate : AllCanvases)
+        {
+            if (!IsValid(Candidate) || Candidate == Canvas || !AreCanvasesLinked(Canvas, Candidate) || IsCanvasLinkEdgeBroken(Canvas, Candidate))
+            {
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
 
     void GatherAttachedRuneCanvases(UWorld *World, TArray<APickupActorAAARuneCanvasInstrument *> &OutCanvases)
     {
@@ -236,6 +303,7 @@ void APickupActorAAARuneCanvasInstrument::EndPlay(const EEndPlayReason::Type End
     LoadedCardResources.Reset();
     ClearRecognitionGridPreview();
     ClearChainLinks();
+    DestroyBrokenChainLinks();
     DrawRenderTarget = nullptr;
     CardDynamicMaterial = nullptr;
     bAwaitingThrowImpact = false;
@@ -650,6 +718,16 @@ float APickupActorAAARuneCanvasInstrument::GetConfiguredCanvasLinkDistance() con
     return LinkDistance;
 }
 
+FVector APickupActorAAARuneCanvasInstrument::GetCanvasLinkAnchorWorldLocation() const
+{
+    if (DrawSurfaceComponent)
+    {
+        return DrawSurfaceComponent->GetComponentTransform().TransformPosition(ChainLinkAnchorLocalOffset);
+    }
+
+    return GetActorLocation();
+}
+
 // --- CalculateNodeSequenceSimilarityPercent ---
 float APickupActorAAARuneCanvasInstrument::CalculateNodeSequenceSimilarityPercent(
     const TArray<int32> &ExpectedNodeSequence,
@@ -1003,9 +1081,9 @@ void APickupActorAAARuneCanvasInstrument::UpdateActivationVisualState()
 
     if (GlowLightComponent)
     {
-        GlowLightComponent->SetHiddenInGame(!bShouldGlow);
-        GlowLightComponent->SetVisibility(bShouldGlow);
-        GlowLightComponent->SetIntensity(bShouldGlow ? ActivationLightIntensity : 0.f);
+        GlowLightComponent->SetHiddenInGame(!(bShouldGlow && bEnableActivationLight));
+        GlowLightComponent->SetVisibility(bShouldGlow && bEnableActivationLight);
+        GlowLightComponent->SetIntensity((bShouldGlow && bEnableActivationLight) ? ActivationLightIntensity : 0.f);
         GlowLightComponent->SetLightColor(ActivationGlowColor);
         GlowLightComponent->SetAttenuationRadius(ActivationLightRadius);
     }
@@ -1079,13 +1157,13 @@ void APickupActorAAARuneCanvasInstrument::RefreshCanvasLinks()
     TArray<APickupActorAAARuneCanvasInstrument*> AllCanvases;
     GatherAttachedRuneCanvases(World, AllCanvases);
 
-    TArray<TPair<FVector, FVector>> LinkEdges;
+    TArray<FRuneCanvasLinkEdge> LinkEdges;
     const FString ThisPathName = GetPathName();
     const FVector ThisAnchor = GetCanvasLinkAnchorLocation(this);
 
     for (APickupActorAAARuneCanvasInstrument* Candidate : AllCanvases)
     {
-        if (!IsValid(Candidate) || Candidate == this || !AreCanvasesLinked(this, Candidate))
+        if (!IsValid(Candidate) || Candidate == this || !AreCanvasesLinked(this, Candidate) || IsCanvasLinkEdgeBroken(this, Candidate))
         {
             continue;
         }
@@ -1095,15 +1173,63 @@ void APickupActorAAARuneCanvasInstrument::RefreshCanvasLinks()
             continue;
         }
 
-        AddUniqueCanvasEdge(LinkEdges, ThisAnchor, GetCanvasLinkAnchorLocation(Candidate));
+        FRuneCanvasLinkEdge LinkEdge;
+        LinkEdge.EdgeKey = BuildCanvasLinkEdgeKey(this, Candidate);
+        LinkEdge.Start = ThisAnchor;
+        LinkEdge.End = GetCanvasLinkAnchorLocation(Candidate);
+        LinkEdges.Add(LinkEdge);
+    }
+
+    const FString NewBuildSignature = BuildChainLinkBuildSignature(LinkEdges);
+    if (!NewBuildSignature.IsEmpty() && NewBuildSignature == ActiveChainLinkBuildSignature)
+    {
+        return;
     }
 
     RebuildChainLinks(LinkEdges);
 }
 
-void APickupActorAAARuneCanvasInstrument::RebuildChainLinks(const TArray<TPair<FVector, FVector>>& LinkEdges)
+FString APickupActorAAARuneCanvasInstrument::BuildChainLinkBuildSignature(const TArray<FRuneCanvasLinkEdge>& LinkEdges) const
 {
-    ClearChainLinks();
+    TArray<FString> EdgeSignatures;
+    EdgeSignatures.Reserve(LinkEdges.Num());
+    EdgeSignatures.Add(FString::Printf(
+        TEXT("settings:spacing-%.2f:max=%d:scale=%.2f,%.2f,%.2f:mesh=%s"),
+        ChainLinkSpacing,
+        MaxChainLinksPerEdge,
+        ChainLinkScale.X,
+        ChainLinkScale.Y,
+        ChainLinkScale.Z,
+        *GetNameSafe(ChainLinkMesh)));
+
+    for (const FRuneCanvasLinkEdge& LinkEdge : LinkEdges)
+    {
+        if (LinkEdge.EdgeKey.IsEmpty() || BreakingChainLinkEdges.Contains(LinkEdge.EdgeKey))
+        {
+            continue;
+        }
+
+        const FVector Start = LinkEdge.Start.GridSnap(1.f);
+        const FVector End = LinkEdge.End.GridSnap(1.f);
+        EdgeSignatures.Add(FString::Printf(
+            TEXT("%s:%d,%d,%d>%d,%d,%d"),
+            *LinkEdge.EdgeKey,
+            FMath::RoundToInt(Start.X),
+            FMath::RoundToInt(Start.Y),
+            FMath::RoundToInt(Start.Z),
+            FMath::RoundToInt(End.X),
+            FMath::RoundToInt(End.Y),
+            FMath::RoundToInt(End.Z)));
+    }
+
+    EdgeSignatures.Sort();
+    return FString::Join(EdgeSignatures, TEXT(";"));
+}
+
+void APickupActorAAARuneCanvasInstrument::RebuildChainLinks(const TArray<FRuneCanvasLinkEdge>& LinkEdges)
+{
+    ClearChainLinks(true);
+    ActiveChainLinkBuildSignature = BuildChainLinkBuildSignature(LinkEdges);
 
     if (!bRenderLinkChains || !CanvasLinkRootComponent || !ChainLinkMesh || LinkEdges.IsEmpty())
     {
@@ -1112,10 +1238,16 @@ void APickupActorAAARuneCanvasInstrument::RebuildChainLinks(const TArray<TPair<F
 
     const float SafeSpacing = FMath::Max(1.f, ChainLinkSpacing);
 
-    for (const TPair<FVector, FVector>& LinkEdge : LinkEdges)
+    for (const FRuneCanvasLinkEdge& LinkEdge : LinkEdges)
     {
-        const FVector StartWorld = LinkEdge.Key;
-        const FVector EndWorld = LinkEdge.Value;
+        if (LinkEdge.EdgeKey.IsEmpty() || BreakingChainLinkEdges.Contains(LinkEdge.EdgeKey) || GetBrokenCanvasLinkEdgeKeysForWorld(GetWorld()).Contains(LinkEdge.EdgeKey))
+        {
+            continue;
+        }
+
+        const FVector StartWorld = LinkEdge.Start;
+        const FVector EndWorld = LinkEdge.End;
+
         const FVector Delta = EndWorld - StartWorld;
         const float Distance = Delta.Size();
         if (Distance <= UE_KINDA_SMALL_NUMBER)
@@ -1124,7 +1256,7 @@ void APickupActorAAARuneCanvasInstrument::RebuildChainLinks(const TArray<TPair<F
         }
 
         const FVector Direction = Delta / Distance;
-        const int32 ChainLinkCount = FMath::Max(1, FMath::CeilToInt(Distance / SafeSpacing));
+        const int32 ChainLinkCount = FMath::Clamp(FMath::CeilToInt(Distance / SafeSpacing), 1, FMath::Max(1, MaxChainLinksPerEdge));
         const float StepDistance = Distance / static_cast<float>(ChainLinkCount);
         const FRotator BaseRotation = Direction.Rotation() + ChainLinkRotationOffset;
 
@@ -1146,8 +1278,23 @@ void APickupActorAAARuneCanvasInstrument::RebuildChainLinks(const TArray<TPair<F
 
             ChainLinkComponent->SetupAttachment(CanvasLinkRootComponent);
             ChainLinkComponent->SetMobility(EComponentMobility::Movable);
-            ChainLinkComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-            ChainLinkComponent->SetGenerateOverlapEvents(false);
+            // ChainLinkComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+            // ChainLinkComponent->SetGenerateOverlapEvents(false);
+            if (ChainLinkTouchedMaterialOverride)
+            {
+                ChainLinkComponent->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+                ChainLinkComponent->SetCollisionObjectType(ECC_WorldDynamic);
+                ChainLinkComponent->SetCollisionResponseToAllChannels(ECR_Ignore);
+                ChainLinkComponent->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+                ChainLinkComponent->SetGenerateOverlapEvents(true);
+                ChainLinkComponent->OnComponentBeginOverlap.AddDynamic(this, &APickupActorAAARuneCanvasInstrument::HandleChainLinkBeginOverlap);
+                ChainLinkComponent->OnComponentEndOverlap.AddDynamic(this, &APickupActorAAARuneCanvasInstrument::HandleChainLinkEndOverlap);
+            }
+            else
+            {
+                ChainLinkComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+                ChainLinkComponent->SetGenerateOverlapEvents(false);
+            }
             ChainLinkComponent->SetCanEverAffectNavigation(false);
             ChainLinkComponent->SetCastShadow(false);
             ChainLinkComponent->SetVisibleInRayTracing(false);
@@ -1156,44 +1303,75 @@ void APickupActorAAARuneCanvasInstrument::RebuildChainLinks(const TArray<TPair<F
             ChainLinkComponent->SetWorldLocationAndRotation(ChainLocation, ChainRotation);
             ChainLinkComponent->SetWorldScale3D(ChainLinkScale);
 
-            const int32 MaterialSlotCount = FMath::Max(ChainLinkMesh->GetStaticMaterials().Num(), 1);
-            for (int32 MaterialIndex = 0; MaterialIndex < MaterialSlotCount; ++MaterialIndex)
-            {
-                UMaterialInterface* BaseMaterial = ChainLinkMaterialOverride
-                    ? ChainLinkMaterialOverride.Get()
-                    : ChainLinkComponent->GetMaterial(MaterialIndex);
-
-                if (!BaseMaterial)
-                {
-                    continue;
-                }
-
-                UMaterialInstanceDynamic* DynamicMaterial = UMaterialInstanceDynamic::Create(BaseMaterial, this);
-                if (!DynamicMaterial)
-                {
-                    continue;
-                }
-
-                DynamicMaterial->SetVectorParameterValue(LinkColorParameterName, LinkGlowColor);
-                DynamicMaterial->SetVectorParameterValue(TEXT("EmissiveColor"), LinkGlowColor);
-                DynamicMaterial->SetScalarParameterValue(LinkGlowScalarParameterName, LinkGlowIntensity);
-                DynamicMaterial->SetScalarParameterValue(TEXT("EmissiveIntensity"), LinkGlowIntensity);
-                DynamicMaterial->SetScalarParameterValue(TEXT("EmissiveStrength"), LinkGlowIntensity);
-                DynamicMaterial->SetScalarParameterValue(LinkPulseScalarParameterName, bAnimateLinkPulse ? LinkPulseMax : 1.f);
-                DynamicMaterial->SetScalarParameterValue(TEXT("EmissivePulse"), bAnimateLinkPulse ? LinkPulseMax : 1.f);
-
-                ChainLinkComponent->SetMaterial(MaterialIndex, DynamicMaterial);
-                ActiveChainLinkMaterialInstances.Add(DynamicMaterial);
-            }
+            // const int32 MaterialSlotCount = FMath::Max(ChainLinkMesh->GetStaticMaterials().Num(), 1);
+            // for (int32 MaterialIndex = 0; MaterialIndex < MaterialSlotCount; ++MaterialIndex)
+            // {
+            //     UMaterialInterface* BaseMaterial = ChainLinkMaterialOverride
+            //         ? ChainLinkMaterialOverride.Get()
+            //         : ChainLinkComponent->GetMaterial(MaterialIndex);
+            ApplyChainLinkDefaultMaterial(ChainLinkComponent);
 
             ActiveChainLinkComponents.Add(ChainLinkComponent);
+            ChainLinkEdgeKeys.Add(ChainLinkComponent, LinkEdge.EdgeKey);
+            ActiveChainLinkComponentsByEdge.FindOrAdd(LinkEdge.EdgeKey).Add(ChainLinkComponent);
         }
     }
 }
 
-void APickupActorAAARuneCanvasInstrument::ClearChainLinks()
+void APickupActorAAARuneCanvasInstrument::ClearChainLinks(bool bPreserveBreakingEdges)
 {
+    TArray<TObjectPtr<UStaticMeshComponent>> PreservedChainLinkComponents;
+    TArray<TObjectPtr<UMaterialInstanceDynamic>> PreservedMaterialInstances;
+    TMap<TObjectPtr<UStaticMeshComponent>, TObjectPtr<UMaterialInstanceDynamic>> PreservedDefaultMaterialInstances;
+    TMap<TObjectPtr<UStaticMeshComponent>, TObjectPtr<UMaterialInstanceDynamic>> PreservedTouchedMaterialInstances;
+    TMap<TObjectPtr<UStaticMeshComponent>, FString> PreservedEdgeKeys;
+    TMap<FString, TArray<TObjectPtr<UStaticMeshComponent>>> PreservedComponentsByEdge;
+
     for (UStaticMeshComponent* ChainLinkComponent : ActiveChainLinkComponents)
+    {
+        const FString* EdgeKey = ChainLinkEdgeKeys.Find(ChainLinkComponent);
+        if (bPreserveBreakingEdges && EdgeKey && BreakingChainLinkEdges.Contains(*EdgeKey))
+        {
+            PreservedChainLinkComponents.Add(ChainLinkComponent);
+            PreservedEdgeKeys.Add(ChainLinkComponent, *EdgeKey);
+            PreservedComponentsByEdge.FindOrAdd(*EdgeKey).Add(ChainLinkComponent);
+
+            if (TObjectPtr<UMaterialInstanceDynamic>* DefaultMaterial = ChainLinkDefaultMaterialInstances.Find(ChainLinkComponent))
+            {
+                PreservedDefaultMaterialInstances.Add(ChainLinkComponent, *DefaultMaterial);
+                PreservedMaterialInstances.AddUnique(*DefaultMaterial);
+            }
+
+            if (TObjectPtr<UMaterialInstanceDynamic>* TouchedMaterial = ChainLinkTouchedMaterialInstances.Find(ChainLinkComponent))
+            {
+                PreservedTouchedMaterialInstances.Add(ChainLinkComponent, *TouchedMaterial);
+                PreservedMaterialInstances.AddUnique(*TouchedMaterial);
+            }
+
+            continue;
+        }
+
+        if (IsValid(ChainLinkComponent))
+        {
+            ChainLinkComponent->DestroyComponent();
+        }
+    }
+
+    ActiveChainLinkComponents = MoveTemp(PreservedChainLinkComponents);
+    ActiveChainLinkMaterialInstances = MoveTemp(PreservedMaterialInstances);
+    ChainLinkDefaultMaterialInstances = MoveTemp(PreservedDefaultMaterialInstances);
+    ChainLinkTouchedMaterialInstances = MoveTemp(PreservedTouchedMaterialInstances);
+    ChainLinkEdgeKeys = MoveTemp(PreservedEdgeKeys);
+    ActiveChainLinkComponentsByEdge = MoveTemp(PreservedComponentsByEdge);
+    if (!bPreserveBreakingEdges)
+    {
+        ActiveChainLinkBuildSignature.Empty();
+    }
+}
+
+void APickupActorAAARuneCanvasInstrument::DestroyBrokenChainLinks()
+{
+    for (UStaticMeshComponent* ChainLinkComponent : BrokenChainLinkComponents)
     {
         if (IsValid(ChainLinkComponent))
         {
@@ -1201,8 +1379,300 @@ void APickupActorAAARuneCanvasInstrument::ClearChainLinks()
         }
     }
 
-    ActiveChainLinkComponents.Reset();
-    ActiveChainLinkMaterialInstances.Reset();
+    BrokenChainLinkComponents.Reset();
+}
+
+void APickupActorAAARuneCanvasInstrument::ApplyChainLinkDefaultMaterial(UStaticMeshComponent* ChainLinkComponent)
+{
+    if (!IsValid(ChainLinkComponent))
+    {
+        return;
+    }
+
+    UMaterialInstanceDynamic* DynamicMaterial = nullptr;
+    if (TObjectPtr<UMaterialInstanceDynamic>* ExistingMaterial = ChainLinkDefaultMaterialInstances.Find(ChainLinkComponent))
+    {
+        DynamicMaterial = ExistingMaterial->Get();
+    }
+
+    if (!IsValid(DynamicMaterial))
+    {
+        UMaterialInterface* BaseMaterial = ChainLinkMaterialOverride
+            ? ChainLinkMaterialOverride.Get()
+            : ChainLinkComponent->GetMaterial(0);
+
+        if (!BaseMaterial)
+        {
+            return;
+        }
+
+        DynamicMaterial = UMaterialInstanceDynamic::Create(BaseMaterial, this);
+        if (!DynamicMaterial)
+        {
+            return;
+        }
+
+        ChainLinkDefaultMaterialInstances.Add(ChainLinkComponent, DynamicMaterial);
+        ActiveChainLinkMaterialInstances.Add(DynamicMaterial);
+    }
+
+    DynamicMaterial->SetVectorParameterValue(LinkColorParameterName, LinkGlowColor);
+    DynamicMaterial->SetVectorParameterValue(TEXT("EmissiveColor"), LinkGlowColor);
+    DynamicMaterial->SetScalarParameterValue(LinkGlowScalarParameterName, LinkGlowIntensity);
+    DynamicMaterial->SetScalarParameterValue(TEXT("EmissiveIntensity"), LinkGlowIntensity);
+    DynamicMaterial->SetScalarParameterValue(TEXT("EmissiveStrength"), LinkGlowIntensity);
+    DynamicMaterial->SetScalarParameterValue(LinkPulseScalarParameterName, bAnimateLinkPulse ? LinkPulseMax : 1.f);
+    DynamicMaterial->SetScalarParameterValue(TEXT("EmissivePulse"), bAnimateLinkPulse ? LinkPulseMax : 1.f);
+
+    const int32 MaterialSlotCount = FMath::Max(ChainLinkComponent->GetNumMaterials(), 1);
+    for (int32 MaterialIndex = 0; MaterialIndex < MaterialSlotCount; ++MaterialIndex)
+    {
+        ChainLinkComponent->SetMaterial(MaterialIndex, DynamicMaterial);
+    }
+}
+
+void APickupActorAAARuneCanvasInstrument::ApplyChainLinkTouchedMaterial(UStaticMeshComponent* ChainLinkComponent)
+{
+    if (!IsValid(ChainLinkComponent) || !ChainLinkTouchedMaterialOverride)
+    {
+        return;
+    }
+
+    UMaterialInstanceDynamic* DynamicMaterial = nullptr;
+    if (TObjectPtr<UMaterialInstanceDynamic>* ExistingMaterial = ChainLinkTouchedMaterialInstances.Find(ChainLinkComponent))
+    {
+        DynamicMaterial = ExistingMaterial->Get();
+    }
+
+    if (!IsValid(DynamicMaterial))
+    {
+        DynamicMaterial = UMaterialInstanceDynamic::Create(ChainLinkTouchedMaterialOverride.Get(), this);
+        if (!DynamicMaterial)
+        {
+            return;
+        }
+
+        ChainLinkTouchedMaterialInstances.Add(ChainLinkComponent, DynamicMaterial);
+        ActiveChainLinkMaterialInstances.Add(DynamicMaterial);
+    }
+
+    DynamicMaterial->SetVectorParameterValue(LinkColorParameterName, LinkGlowColor);
+    DynamicMaterial->SetVectorParameterValue(TEXT("EmissiveColor"), LinkGlowColor);
+    DynamicMaterial->SetScalarParameterValue(LinkGlowScalarParameterName, LinkGlowIntensity);
+    DynamicMaterial->SetScalarParameterValue(TEXT("EmissiveIntensity"), LinkGlowIntensity);
+    DynamicMaterial->SetScalarParameterValue(TEXT("EmissiveStrength"), LinkGlowIntensity);
+    DynamicMaterial->SetScalarParameterValue(LinkPulseScalarParameterName, bAnimateLinkPulse ? LinkPulseMax : 1.f);
+    DynamicMaterial->SetScalarParameterValue(TEXT("EmissivePulse"), bAnimateLinkPulse ? LinkPulseMax : 1.f);
+
+    const int32 MaterialSlotCount = FMath::Max(ChainLinkComponent->GetNumMaterials(), 1);
+    for (int32 MaterialIndex = 0; MaterialIndex < MaterialSlotCount; ++MaterialIndex)
+    {
+        ChainLinkComponent->SetMaterial(MaterialIndex, DynamicMaterial);
+    }
+}
+
+void APickupActorAAARuneCanvasInstrument::HandleChainLinkBeginOverlap(
+    UPrimitiveComponent* OverlappedComponent,
+    AActor* OtherActor,
+    UPrimitiveComponent* OtherComp,
+    int32 OtherBodyIndex,
+    bool bFromSweep,
+    const FHitResult& SweepResult)
+{
+    (void)OtherComp;
+    (void)OtherBodyIndex;
+    (void)bFromSweep;
+    (void)SweepResult;
+
+    if (!Cast<APawn>(OtherActor))
+    {
+        return;
+    }
+
+    UStaticMeshComponent* ChainLinkComponent = Cast<UStaticMeshComponent>(OverlappedComponent);
+    if (!IsValid(ChainLinkComponent))
+    {
+        return;
+    }
+
+    if (FString* EdgeKey = ChainLinkEdgeKeys.Find(ChainLinkComponent))
+    {
+        MarkChainLinkEdgeTouched(*EdgeKey);
+        return;
+    }
+
+    ApplyChainLinkTouchedMaterial(ChainLinkComponent);
+}
+
+void APickupActorAAARuneCanvasInstrument::HandleChainLinkEndOverlap(
+    UPrimitiveComponent* OverlappedComponent,
+    AActor* OtherActor,
+    UPrimitiveComponent* OtherComp,
+    int32 OtherBodyIndex)
+{
+    (void)OtherComp;
+    (void)OtherBodyIndex;
+
+    if (!Cast<APawn>(OtherActor))
+    {
+        return;
+    }
+
+    UStaticMeshComponent* ChainLinkComponent = Cast<UStaticMeshComponent>(OverlappedComponent);
+    if (!IsValid(ChainLinkComponent))
+    {
+        return;
+    }
+
+    TArray<AActor*> OverlappingPawns;
+    ChainLinkComponent->GetOverlappingActors(OverlappingPawns, APawn::StaticClass());
+    const FString* EdgeKey = ChainLinkEdgeKeys.Find(ChainLinkComponent);
+    if (OverlappingPawns.IsEmpty() && (!EdgeKey || !BreakingChainLinkEdges.Contains(*EdgeKey)))
+    {
+        ApplyChainLinkDefaultMaterial(ChainLinkComponent);
+    }
+}
+
+void APickupActorAAARuneCanvasInstrument::MarkChainLinkEdgeTouched(const FString& EdgeKey)
+{
+    if (EdgeKey.IsEmpty() || GetBrokenCanvasLinkEdgeKeysForWorld(GetWorld()).Contains(EdgeKey))
+    {
+        return;
+    }
+
+    if (TArray<TObjectPtr<UStaticMeshComponent>>* ChainLinkComponents = ActiveChainLinkComponentsByEdge.Find(EdgeKey))
+    {
+        for (UStaticMeshComponent* ChainLinkComponent : *ChainLinkComponents)
+        {
+            ApplyChainLinkTouchedMaterial(ChainLinkComponent);
+        }
+    }
+
+    if (BreakingChainLinkEdges.Contains(EdgeKey))
+    {
+        return;
+    }
+
+    BreakingChainLinkEdges.Add(EdgeKey);
+
+    FTimerDelegate BreakDelegate;
+    BreakDelegate.BindUObject(this, &APickupActorAAARuneCanvasInstrument::BreakChainLinkEdge, EdgeKey);
+    GetWorldTimerManager().SetTimer(
+        ChainLinkBreakTimerHandles.FindOrAdd(EdgeKey),
+        BreakDelegate,
+        FMath::Max(0.f, ChainLinkBreakDelay),
+        false);
+}
+
+void APickupActorAAARuneCanvasInstrument::BreakChainLinkEdge(FString EdgeKey)
+{
+    if (EdgeKey.IsEmpty())
+    {
+        return;
+    }
+
+    GetBrokenCanvasLinkEdgeKeysForWorld(GetWorld()).Add(EdgeKey);
+    BreakingChainLinkEdges.Remove(EdgeKey);
+    ChainLinkBreakTimerHandles.Remove(EdgeKey);
+
+    TArray<TObjectPtr<UStaticMeshComponent>> ChainLinkComponents;
+    if (TArray<TObjectPtr<UStaticMeshComponent>>* ExistingComponents = ActiveChainLinkComponentsByEdge.Find(EdgeKey))
+    {
+        ChainLinkComponents = *ExistingComponents;
+    }
+
+    ActiveChainLinkComponentsByEdge.Remove(EdgeKey);
+
+    UWorld* World = GetWorld();
+    for (UStaticMeshComponent* ChainLinkComponent : ChainLinkComponents)
+    {
+        if (!IsValid(ChainLinkComponent))
+        {
+            continue;
+        }
+
+        ActiveChainLinkComponents.Remove(ChainLinkComponent);
+        ChainLinkEdgeKeys.Remove(ChainLinkComponent);
+        ChainLinkDefaultMaterialInstances.Remove(ChainLinkComponent);
+        ChainLinkTouchedMaterialInstances.Remove(ChainLinkComponent);
+        ChainLinkComponent->OnComponentBeginOverlap.RemoveAll(this);
+        ChainLinkComponent->OnComponentEndOverlap.RemoveAll(this);
+        ChainLinkComponent->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
+
+        ChainLinkComponent->SetCollisionEnabled(bBrokenChainLinksCollideWithWorld ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
+        ChainLinkComponent->SetCollisionObjectType(ECC_WorldDynamic);
+        ChainLinkComponent->SetCollisionResponseToAllChannels(bBrokenChainLinksCollideWithWorld ? ECR_Block : ECR_Ignore);
+        ChainLinkComponent->SetGenerateOverlapEvents(false);
+        ChainLinkComponent->SetSimulatePhysics(bBrokenChainLinksSimulatePhysics);
+        ChainLinkComponent->SetEnableGravity(bBrokenChainLinksSimulatePhysics);
+
+        const FVector BreakImpulseDirection = (ChainLinkComponent->GetComponentLocation() - GetCanvasLinkAnchorWorldLocation()).GetSafeNormal();
+        const FVector BreakImpulse = (BreakImpulseDirection.IsNearlyZero() ? FVector::UpVector : BreakImpulseDirection + FVector(0.f, 0.f, 0.35f)).GetSafeNormal() * BrokenChainLinkImpulse;
+
+        if (bBrokenChainLinksSimulatePhysics)
+        {
+            ChainLinkComponent->WakeAllRigidBodies();
+            ChainLinkComponent->AddImpulse(BreakImpulse, NAME_None, true);
+        }
+        else
+        {
+            ChainLinkComponent->AddWorldOffset(BreakImpulse * 0.03f, false, nullptr, ETeleportType::TeleportPhysics);
+        }
+        BrokenChainLinkComponents.Add(ChainLinkComponent);
+
+        if (World && BrokenChainLinkLifetime > 0.f)
+        {
+            FTimerDelegate DestroyDelegate;
+            DestroyDelegate.BindUObject(this, &APickupActorAAARuneCanvasInstrument::FinishBrokenChainLinkComponent, ChainLinkComponent);
+            FTimerHandle DestroyTimerHandle;
+            World->GetTimerManager().SetTimer(DestroyTimerHandle, DestroyDelegate, BrokenChainLinkLifetime, false);
+        }
+    }
+
+    DestroyIfNoActiveCanvasLinks(EdgeKey);
+}
+
+void APickupActorAAARuneCanvasInstrument::FinishBrokenChainLinkComponent(UStaticMeshComponent* ChainLinkComponent)
+{
+    BrokenChainLinkComponents.Remove(ChainLinkComponent);
+    if (IsValid(ChainLinkComponent))
+    {
+        ChainLinkComponent->DestroyComponent();
+    }
+}
+
+void APickupActorAAARuneCanvasInstrument::DestroyIfNoActiveCanvasLinks(const FString& BrokenEdgeKey)
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+
+    TArray<APickupActorAAARuneCanvasInstrument*> AllCanvases;
+    GatherAttachedRuneCanvases(World, AllCanvases);
+
+    TArray<APickupActorAAARuneCanvasInstrument*> CanvasesToDestroy;
+    for (APickupActorAAARuneCanvasInstrument* Canvas : AllCanvases)
+    {
+        if (!IsValid(Canvas) || !IsCanvasPathPartOfEdgeKey(BrokenEdgeKey, Canvas->GetPathName()))
+        {
+            continue;
+        }
+
+        if (!HasAnyUnbrokenCanvasLink(Canvas, AllCanvases))
+        {
+            CanvasesToDestroy.Add(Canvas);
+        }
+    }
+
+    for (APickupActorAAARuneCanvasInstrument* Canvas : CanvasesToDestroy)
+    {
+        if (IsValid(Canvas))
+        {
+            Canvas->Destroy();
+        }
+    }
 }
 
 void APickupActorAAARuneCanvasInstrument::UpdateChainLinkPulseVisuals(float DeltaTime)
