@@ -37,32 +37,33 @@ public:
     APickupActorAAARuneCanvasInstrument();
 
     virtual void BeginPlay() override;
-    virtual void OnConstruction(const FTransform& Transform) override;
+    virtual void OnConstruction(const FTransform &Transform) override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+    virtual void Tick(float DeltaTime) override;
     virtual void OnPickedUp() override;
     virtual void OnPutDown(FVector PlaceLocation, FRotator PlaceRotation) override;
     virtual void OnThrown(FVector ThrowDirection, float ThrowForce) override;
 
     UFUNCTION(BlueprintCallable, Category = "RuneCanvas")
-    bool BeginRuneDraw(APlayerController* UsingController);
+    bool BeginRuneDraw(APlayerController *UsingController);
 
     UFUNCTION(BlueprintCallable, Category = "RuneCanvas")
-    bool BeginRuneStroke(APlayerController* UsingController, const FVector2D& ScreenPosition);
+    bool BeginRuneStroke(APlayerController *UsingController, const FVector2D &ScreenPosition);
 
     UFUNCTION(BlueprintCallable, Category = "RuneCanvas")
     void EndRuneStroke();
 
     UFUNCTION(BlueprintCallable, Category = "RuneCanvas")
-    void UpdateRuneDrawFromScreenPosition(APlayerController* UsingController, const FVector2D& ScreenPosition);
+    void UpdateRuneDrawFromScreenPosition(APlayerController *UsingController, const FVector2D &ScreenPosition);
 
     UFUNCTION(BlueprintCallable, Category = "RuneCanvas")
-    TArray<int32> EndRuneDraw(APlayerController* UsingController);
+    TArray<int32> EndRuneDraw(APlayerController *UsingController);
 
     UFUNCTION(BlueprintCallable, Category = "RuneCanvas")
     void ResetRuneState();
 
     UFUNCTION(BlueprintCallable, Category = "RuneCanvas")
-    void CommitRuneSequenceAuthority(const TArray<int32>& NodeSequence, AActor* SolvingActor);
+    void CommitRuneSequenceAuthority(const TArray<int32> &NodeSequence, AActor *SolvingActor);
 
     UFUNCTION(BlueprintCallable, Category = "RuneCanvas|RenderTarget")
     void ClearDrawTexture();
@@ -119,12 +120,27 @@ public:
     int32 GetHiddenNodeId(int32 Row, int32 Column) const;
 
     UFUNCTION(BlueprintPure, Category = "RuneCanvas|RenderTarget")
-    UTextureRenderTarget2D* GetDrawRenderTarget() const
+    UTextureRenderTarget2D *GetDrawRenderTarget() const
     {
         return DrawRenderTarget;
     }
 
-    bool GetPreferredDrawStartScreenPosition(APlayerController* PC, FVector2D& OutScreenPosition) const;
+    UFUNCTION(BlueprintPure, Category = "RuneCanvas|Attach")
+    bool IsAttachedToSurface() const
+    {
+        return bAttachedToSurface;
+    }
+
+    UFUNCTION(BlueprintPure, Category = "RuneCanvas|Pickup")
+    bool CanBePickedUpByPlayer() const
+    {
+        return !bAttachedToSurface;
+    }
+
+    bool CanParticipateInCanvasLinks() const;
+    float GetConfiguredCanvasLinkDistance() const;
+
+    bool GetPreferredDrawStartScreenPosition(APlayerController *PC, FVector2D &OutScreenPosition) const;
 
 protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
@@ -132,6 +148,9 @@ protected:
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     TObjectPtr<UPointLightComponent> GlowLightComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    TObjectPtr<USceneComponent> CanvasLinkRootComponent;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Surface")
     FVector2D DrawSurfaceSize = FVector2D(60.f, 20.f);
@@ -277,6 +296,12 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Attach", meta = (ClampMin = "0.0"))
     float AttachSurfacePadding = 1.f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Attach", meta = (ClampMin = "1.0"))
+    float AttachTraceRadius = 8.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Attach", meta = (ClampMin = "1.0"))
+    float AttachTraceForwardPadding = 35.f;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Visual")
     FLinearColor ActivationGlowColor = FLinearColor(0.12f, 0.85f, 1.f, 1.f);
 
@@ -289,14 +314,71 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Visual", meta = (ClampMin = "50.0"))
     float ActivationLightRadius = 220.f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links", meta = (ClampMin = "50.0"))
+    float LinkDistance = 550.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links")
+    bool bRenderLinkChains = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links")
+    TObjectPtr<UStaticMesh> ChainLinkMesh = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links")
+    TObjectPtr<UMaterialInterface> ChainLinkMaterialOverride = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links", meta = (ClampMin = "1.0"))
+    float ChainLinkSpacing = 28.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links", meta = (ClampMin = "0.001"))
+    FVector ChainLinkScale = FVector(1.f, 1.f, 1.f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links")
+    FRotator ChainLinkRotationOffset = FRotator::ZeroRotator;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links")
+    bool bAlternateChainLinkRoll = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links")
+    float AlternateChainLinkRollDegrees = 90.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links", meta = (ClampMin = "0.02"))
+    float LinkRefreshInterval = 0.25f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links")
+    bool bAnimateLinkPulse = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links", meta = (ClampMin = "0.0"))
+    float LinkPulseSpeed = 1.6f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links", meta = (ClampMin = "0.0"))
+    float LinkPulseMin = 0.35f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links", meta = (ClampMin = "0.0"))
+    float LinkPulseMax = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links", meta = (ClampMin = "0.0"))
+    float LinkGlowIntensity = 6.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links")
+    FLinearColor LinkGlowColor = FLinearColor(0.65f, 0.95f, 1.0f, 1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links")
+    FName LinkPulseScalarParameterName = TEXT("Pulse");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links")
+    FName LinkGlowScalarParameterName = TEXT("GlowIntensity");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links")
+    FName LinkColorParameterName = TEXT("GlowColor");
+
     UFUNCTION(BlueprintImplementableEvent, Category = "RuneCanvas|Visual")
-    void ReceiveRuneCanvasDrawStateChanged(const TArray<FVector2D>& ActiveUVPoints, bool bDrawingActive);
+    void ReceiveRuneCanvasDrawStateChanged(const TArray<FVector2D> &ActiveUVPoints, bool bDrawingActive);
 
     UFUNCTION(BlueprintImplementableEvent, Category = "RuneCanvas|Recognition")
-    void ReceiveRuneCanvasNodeSequenceChanged(const TArray<int32>& ActiveNodeSequence, int32 NewNodeId);
+    void ReceiveRuneCanvasNodeSequenceChanged(const TArray<int32> &ActiveNodeSequence, int32 NewNodeId);
 
     UFUNCTION(BlueprintImplementableEvent, Category = "RuneCanvas|Gameplay")
-    void ReceiveRuneCanvasPatternSolved(FName PatternId, AActor* SolvingActor);
+    void ReceiveRuneCanvasPatternSolved(FName PatternId, AActor *SolvingActor);
 
 private:
     UPROPERTY(Transient)
@@ -314,6 +396,12 @@ private:
     UPROPERTY(Transient)
     TArray<TObjectPtr<UStaticMeshComponent>> RecognitionGridPreviewComponents;
 
+    UPROPERTY(Transient)
+    TArray<TObjectPtr<UStaticMeshComponent>> ActiveChainLinkComponents;
+
+    UPROPERTY(Transient)
+    TArray<TObjectPtr<UMaterialInstanceDynamic>> ActiveChainLinkMaterialInstances;
+
     TArray<FVector2D> DrawnUVPoints;
     TArray<int32> RecognizedNodeSequence;
 
@@ -326,49 +414,56 @@ private:
     bool bAwaitingThrowImpact = false;
     bool bAttachedToSurface = false;
     FName SolvedPatternId = NAME_None;
+    FVector LastAttachTraceLocation = FVector::ZeroVector;
+    float LinkRefreshAccumulator = 0.f;
+    float LinkPulseTimeAccumulator = 0.f;
 
     UFUNCTION()
     void HandleRuneCanvasHit(
-        UPrimitiveComponent* HitComponent,
-        AActor* OtherActor,
-        UPrimitiveComponent* OtherComp,
+        UPrimitiveComponent *HitComponent,
+        AActor *OtherActor,
+        UPrimitiveComponent *OtherComp,
         FVector NormalImpulse,
-        const FHitResult& Hit);
-
+        const FHitResult &Hit);
 
     bool EnsureDrawResources();
     void ApplyThrowablePhysicsTuning();
     void RestoreDefaultThrowableCollision();
-    void StickToImpact(const FHitResult& Hit, UPrimitiveComponent* HitComponent);
+    void UpdateThrownAttachTrace();
+    void StickToImpact(const FHitResult &Hit, UPrimitiveComponent *HitComponent);
     void UpdateActivationVisualState();
+    void RefreshCanvasLinks();
+    void RebuildChainLinks(const TArray<TPair<FVector, FVector>> &LinkEdges);
+    void ClearChainLinks();
+    void UpdateChainLinkPulseVisuals(float DeltaTime);
     void LoadCardResources();
     void ApplyCurrentCardResourceTexture();
-    const TArray<int32>& GetExpectedNodeSequenceForCurrentCard() const;
-    float CalculateNodeSequenceSimilarityPercent(const TArray<int32>& ExpectedNodeSequence, const TArray<int32>& UserNodeSequence) const;
-    float CalculateBidirectionalCoverageScore(const TArray<int32>& SourceNodeSequence, const TArray<int32>& TargetNodeSequence) const;
-    float CalculateWeightedEditSimilarityScore(const TArray<int32>& ExpectedNodeSequence, const TArray<int32>& UserNodeSequence) const;
+    const TArray<int32> &GetExpectedNodeSequenceForCurrentCard() const;
+    float CalculateNodeSequenceSimilarityPercent(const TArray<int32> &ExpectedNodeSequence, const TArray<int32> &UserNodeSequence) const;
+    float CalculateBidirectionalCoverageScore(const TArray<int32> &SourceNodeSequence, const TArray<int32> &TargetNodeSequence) const;
+    float CalculateWeightedEditSimilarityScore(const TArray<int32> &ExpectedNodeSequence, const TArray<int32> &UserNodeSequence) const;
     float CalculateNodeDistanceInCells(int32 NodeA, int32 NodeB) const;
-    void LogCurrentCardAndUserSequences(const TCHAR* Context, const TArray<int32>& UserNodeSequence) const;
+    void LogCurrentCardAndUserSequences(const TCHAR *Context, const TArray<int32> &UserNodeSequence) const;
     void EnableMouseTraceCollisionIfNeeded();
     void RestoreHeldCollisionAfterMouseTrace();
-    bool IsUVInsideRecognitionArea(const FVector2D& UV) const;
-    FVector2D NormalizeUVToRecognitionArea(const FVector2D& UV) const;
-    FVector2D DenormalizeRecognitionAreaUV(const FVector2D& AreaUV) const;
-    FVector GetDrawSurfaceLocalLocationFromUV(const FVector2D& UV) const;
+    bool IsUVInsideRecognitionArea(const FVector2D &UV) const;
+    FVector2D NormalizeUVToRecognitionArea(const FVector2D &UV) const;
+    FVector2D DenormalizeRecognitionAreaUV(const FVector2D &AreaUV) const;
+    FVector GetDrawSurfaceLocalLocationFromUV(const FVector2D &UV) const;
     void DrawRecognitionGridGuide();
     void RebuildRecognitionGridPreview();
     void ClearRecognitionGridPreview();
-    bool ResolveDrawUVFromMouseTrace(APlayerController* UsingController, const FVector2D& ScreenPosition, FVector2D& OutUV) const;
-    bool ResolveDrawUVFromScreenPosition(APlayerController* UsingController, const FVector2D& ScreenPosition, FVector2D& OutUV) const;
-    bool ResolveDrawUVFromWorldLocation(const FVector& WorldLocation, FVector2D& OutUV) const;
-    void AddDrawPoint(const FVector2D& UV);
-    void DrawStrokeSegment(const FVector2D& StartUV, const FVector2D& EndUV);
-    int32 ResolveHiddenNodeFromUV(const FVector2D& UV) const;
-    bool GetHiddenNodeCoordinatesForId(int32 NodeId, int32& OutRow, int32& OutColumn) const;
+    bool ResolveDrawUVFromMouseTrace(APlayerController *UsingController, const FVector2D &ScreenPosition, FVector2D &OutUV) const;
+    bool ResolveDrawUVFromScreenPosition(APlayerController *UsingController, const FVector2D &ScreenPosition, FVector2D &OutUV) const;
+    bool ResolveDrawUVFromWorldLocation(const FVector &WorldLocation, FVector2D &OutUV) const;
+    void AddDrawPoint(const FVector2D &UV);
+    void DrawStrokeSegment(const FVector2D &StartUV, const FVector2D &EndUV);
+    int32 ResolveHiddenNodeFromUV(const FVector2D &UV) const;
+    bool GetHiddenNodeCoordinatesForId(int32 NodeId, int32 &OutRow, int32 &OutColumn) const;
     void TryAppendRecognizedNode(int32 NodeId);
     bool TryAppendSingleRecognizedNode(int32 NodeId);
     void AppendInterpolatedNodesBetween(int32 FromNodeId, int32 ToNodeId);
     FString BuildRecognizedNodeSequenceString() const;
-    void LogRecognizedNodeSequence(const TCHAR* Context) const;
-    bool TryResolveAcceptedPattern(const TArray<int32>& NodeSequence, FName& OutPatternId) const;
+    void LogRecognizedNodeSequence(const TCHAR *Context) const;
+    bool TryResolveAcceptedPattern(const TArray<int32> &NodeSequence, FName &OutPatternId) const;
 };

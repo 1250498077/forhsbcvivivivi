@@ -4,9 +4,11 @@
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/Canvas.h"
+#include "Engine/StaticMesh.h"
 #include "Engine/Texture2D.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetRenderingLibrary.h"
@@ -14,24 +16,23 @@
 #include "Materials/MaterialInterface.h"
 #include "PhysicsEngine/BodyInstance.h"
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "CollisionShape.h"
 #include "UObject/ConstructorHelpers.h"
-
 
 namespace
 {
     const FString CardResourceScanPath = TEXT("/Game/item/canvas/cardtype");
     const FString CardResourcePrefix = TEXT("card_resource_");
 
-    const TArray<TArray<int32>>& GetHardcodedCardExpectedSequences()
+    const TArray<TArray<int32>> &GetHardcodedCardExpectedSequences()
     {
         // card_resource_0 -> {1, 2, 3, 4}. 后续你从 log 复制后，在这里继续按下标追加。
         static const TArray<TArray<int32>> Sequences = {
-            {380,419,418,417,416,415,414,413,412,411,410,409,408,407,406,446,447,448,449,450,451,452,453,454,455,456,457,458,459,500,501,502,503,504,505,506,507,508,465,464,463,462,421,420,378,377,376,335,334,293,292,291,251,250,210,331,372,493,533,573,613,574,575,536,537,498,499,460,461,424,425,426,427,388,389,390,391,392,353,354,355,356,357,358,319,318,317,316,315,314,313,352,351,350,349,348,347,346,345,384,383,382,381,379,375,374}
-        };
+            {380, 419, 418, 417, 416, 415, 414, 413, 412, 411, 410, 409, 408, 407, 406, 446, 447, 448, 449, 450, 451, 452, 453, 454, 455, 456, 457, 458, 459, 500, 501, 502, 503, 504, 505, 506, 507, 508, 465, 464, 463, 462, 421, 420, 378, 377, 376, 335, 334, 293, 292, 291, 251, 250, 210, 331, 372, 493, 533, 573, 613, 574, 575, 536, 537, 498, 499, 460, 461, 424, 425, 426, 427, 388, 389, 390, 391, 392, 353, 354, 355, 356, 357, 358, 319, 318, 317, 316, 315, 314, 313, 352, 351, 350, 349, 348, 347, 346, 345, 384, 383, 382, 381, 379, 375, 374}};
         return Sequences;
     }
 
-    bool TryParseCardResourceIndex(const FString& AssetName, int32& OutIndex)
+    bool TryParseCardResourceIndex(const FString &AssetName, int32 &OutIndex)
     {
         OutIndex = INDEX_NONE;
         if (!AssetName.StartsWith(CardResourcePrefix, ESearchCase::IgnoreCase))
@@ -57,7 +58,7 @@ namespace
         return OutIndex >= 0;
     }
 
-    FString BuildNodeSequenceLogString(const TArray<int32>& NodeSequence)
+    FString BuildNodeSequenceLogString(const TArray<int32> &NodeSequence)
     {
         FString Result = TEXT("[");
         for (int32 Index = 0; Index < NodeSequence.Num(); ++Index)
@@ -71,12 +72,88 @@ namespace
         Result += TEXT("]");
         return Result;
     }
-}
 
+    bool AreCanvasLocationsEquivalent(const FVector &A, const FVector &B)
+    {
+        return A.Equals(B, 0.1f);
+    }
+
+    bool HasMatchingCanvasEdge(const TArray<TPair<FVector, FVector>> &Edges, const FVector &First, const FVector &Second)
+    {
+        return Edges.ContainsByPredicate(
+            [&](const TPair<FVector, FVector> &ExistingEdge)
+            {
+                return (AreCanvasLocationsEquivalent(ExistingEdge.Key, First) && AreCanvasLocationsEquivalent(ExistingEdge.Value, Second)) || (AreCanvasLocationsEquivalent(ExistingEdge.Key, Second) && AreCanvasLocationsEquivalent(ExistingEdge.Value, First));
+            });
+    }
+
+    void AddUniqueCanvasEdge(TArray<TPair<FVector, FVector>> &Edges, const FVector &First, const FVector &Second)
+    {
+        if (AreCanvasLocationsEquivalent(First, Second) || HasMatchingCanvasEdge(Edges, First, Second))
+        {
+            return;
+        }
+
+        Edges.Emplace(First, Second);
+    }
+
+    FVector GetCanvasLinkAnchorLocation(const APickupActorAAARuneCanvasInstrument *Canvas)
+    {
+        return IsValid(Canvas) ? Canvas->GetActorLocation() : FVector::ZeroVector;
+    }
+
+    float GetEffectiveCanvasLinkDistance(
+        const APickupActorAAARuneCanvasInstrument *A,
+        const APickupActorAAARuneCanvasInstrument *B)
+    {
+        if (!IsValid(A) || !IsValid(B))
+        {
+            return 0.f;
+        }
+
+        return FMath::Min(A->GetConfiguredCanvasLinkDistance(), B->GetConfiguredCanvasLinkDistance());
+    }
+
+    bool AreCanvasesLinked(const APickupActorAAARuneCanvasInstrument *A, const APickupActorAAARuneCanvasInstrument *B)
+    {
+        if (!IsValid(A) || !IsValid(B) || A == B)
+        {
+            return false;
+        }
+
+        if (!A->CanParticipateInCanvasLinks() || !B->CanParticipateInCanvasLinks())
+        {
+            return false;
+        }
+
+        return FVector::DistSquared(GetCanvasLinkAnchorLocation(A), GetCanvasLinkAnchorLocation(B)) <= FMath::Square(GetEffectiveCanvasLinkDistance(A, B));
+    }
+
+    void GatherAttachedRuneCanvases(UWorld *World, TArray<APickupActorAAARuneCanvasInstrument *> &OutCanvases)
+    {
+        OutCanvases.Reset();
+
+        if (!World)
+        {
+            return;
+        }
+
+        for (TActorIterator<APickupActorAAARuneCanvasInstrument> It(World); It; ++It)
+        {
+            APickupActorAAARuneCanvasInstrument *Canvas = *It;
+            if (!IsValid(Canvas) || !Canvas->CanParticipateInCanvasLinks())
+            {
+                continue;
+            }
+
+            OutCanvases.Add(Canvas);
+        }
+    }
+}
 
 APickupActorAAARuneCanvasInstrument::APickupActorAAARuneCanvasInstrument()
 {
-    PrimaryActorTick.bCanEverTick = false;
+    PrimaryActorTick.bCanEverTick = true;
 
     HoldType = EHoldItemType::RuneGridInstrument;
     FP_SocketName = TEXT("RightSocket");
@@ -116,6 +193,8 @@ APickupActorAAARuneCanvasInstrument::APickupActorAAARuneCanvasInstrument()
     GlowLightComponent->SetVisibility(false);
     GlowLightComponent->SetHiddenInGame(true);
     GlowLightComponent->SetCanEverAffectNavigation(false);
+    CanvasLinkRootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("CanvasLinkRootComponent"));
+    CanvasLinkRootComponent->SetupAttachment(VisualMeshRootComponent);
 
     static ConstructorHelpers::FObjectFinder<UStaticMesh> DefaultPlaneMesh(TEXT("/Engine/BasicShapes/Plane.Plane"));
     if (DefaultPlaneMesh.Succeeded())
@@ -136,7 +215,7 @@ void APickupActorAAARuneCanvasInstrument::BeginPlay()
     UpdateActivationVisualState();
 }
 
-void APickupActorAAARuneCanvasInstrument::OnConstruction(const FTransform& Transform)
+void APickupActorAAARuneCanvasInstrument::OnConstruction(const FTransform &Transform)
 {
     Super::OnConstruction(Transform);
     RebuildRecognitionGridPreview();
@@ -156,18 +235,44 @@ void APickupActorAAARuneCanvasInstrument::EndPlay(const EEndPlayReason::Type End
     RecognizedNodeSequence.Reset();
     LoadedCardResources.Reset();
     ClearRecognitionGridPreview();
+    ClearChainLinks();
     DrawRenderTarget = nullptr;
     CardDynamicMaterial = nullptr;
     bAwaitingThrowImpact = false;
     bAttachedToSurface = false;
+    LastAttachTraceLocation = FVector::ZeroVector;
 
     Super::EndPlay(EndPlayReason);
+}
+
+void APickupActorAAARuneCanvasInstrument::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+    UpdateThrownAttachTrace();
+    UpdateChainLinkPulseVisuals(DeltaTime);
+
+    if (!bAttachedToSurface)
+    {
+        return;
+    }
+
+    LinkRefreshAccumulator += DeltaTime;
+    if (LinkRefreshAccumulator < FMath::Max(LinkRefreshInterval, 0.02f))
+    {
+        return;
+    }
+
+    LinkRefreshAccumulator = 0.f;
+    RefreshCanvasLinks();
 }
 
 void APickupActorAAARuneCanvasInstrument::OnPickedUp()
 {
     bAwaitingThrowImpact = false;
     bAttachedToSurface = false;
+    LastAttachTraceLocation = FVector::ZeroVector;
+    LinkRefreshAccumulator = 0.f;
+    ClearChainLinks();
     RestoreDefaultThrowableCollision();
     Super::OnPickedUp();
     ResetRuneState();
@@ -178,6 +283,9 @@ void APickupActorAAARuneCanvasInstrument::OnPutDown(FVector PlaceLocation, FRota
 {
     bAwaitingThrowImpact = false;
     bAttachedToSurface = false;
+    LastAttachTraceLocation = FVector::ZeroVector;
+    LinkRefreshAccumulator = 0.f;
+    ClearChainLinks();
     RestoreDefaultThrowableCollision();
     Super::OnPutDown(PlaceLocation, PlaceRotation);
     ResetRuneState();
@@ -188,6 +296,9 @@ void APickupActorAAARuneCanvasInstrument::OnThrown(FVector ThrowDirection, float
 {
     bAwaitingThrowImpact = true;
     bAttachedToSurface = false;
+    LastAttachTraceLocation = GetActorLocation();
+    LinkRefreshAccumulator = 0.f;
+    ClearChainLinks();
     RestoreDefaultThrowableCollision();
     Super::OnThrown(ThrowDirection, ThrowForce);
     ResetRuneState();
@@ -195,11 +306,11 @@ void APickupActorAAARuneCanvasInstrument::OnThrown(FVector ThrowDirection, float
 }
 
 void APickupActorAAARuneCanvasInstrument::HandleRuneCanvasHit(
-    UPrimitiveComponent* HitComponent,
-    AActor* OtherActor,
-    UPrimitiveComponent* OtherComp,
+    UPrimitiveComponent *HitComponent,
+    AActor *OtherActor,
+    UPrimitiveComponent *OtherComp,
     FVector NormalImpulse,
-    const FHitResult& Hit)
+    const FHitResult &Hit)
 {
     (void)NormalImpulse;
 
@@ -208,7 +319,7 @@ void APickupActorAAARuneCanvasInstrument::HandleRuneCanvasHit(
         return;
     }
 
-    if (!IsValid(OtherActor) || OtherActor == this)
+    if (OtherActor == this || (!IsValid(OtherActor) && !IsValid(OtherComp)))
     {
         return;
     }
@@ -216,11 +327,13 @@ void APickupActorAAARuneCanvasInstrument::HandleRuneCanvasHit(
     StickToImpact(Hit, OtherComp);
     bAttachedToSurface = true;
     UpdateActivationVisualState();
+    LinkRefreshAccumulator = LinkRefreshInterval;
+    RefreshCanvasLinks();
 
     UE_LOG(LogTemp, Log, TEXT("%s rune canvas attached to %s"), *GetName(), *GetNameSafe(OtherActor));
 }
 
-bool APickupActorAAARuneCanvasInstrument::BeginRuneDraw(APlayerController* UsingController)
+bool APickupActorAAARuneCanvasInstrument::BeginRuneDraw(APlayerController *UsingController)
 {
     if (!UsingController || !EnsureDrawResources())
     {
@@ -248,8 +361,8 @@ bool APickupActorAAARuneCanvasInstrument::BeginRuneDraw(APlayerController* Using
 }
 
 bool APickupActorAAARuneCanvasInstrument::BeginRuneStroke(
-    APlayerController* UsingController,
-    const FVector2D& ScreenPosition)
+    APlayerController *UsingController,
+    const FVector2D &ScreenPosition)
 {
     if (!bRuneDrawActive || !UsingController)
     {
@@ -271,10 +384,10 @@ void APickupActorAAARuneCanvasInstrument::EndRuneStroke()
     bCanInterpolateNextRecognizedNode = false;
 }
 
-// 3. 根据屏幕位置更新绘制 
+// 3. 根据屏幕位置更新绘制
 void APickupActorAAARuneCanvasInstrument::UpdateRuneDrawFromScreenPosition(
-    APlayerController* UsingController,
-    const FVector2D& ScreenPosition)
+    APlayerController *UsingController,
+    const FVector2D &ScreenPosition)
 {
     if (!bRuneDrawActive || !bRuneStrokeActive || !UsingController)
     {
@@ -297,7 +410,7 @@ void APickupActorAAARuneCanvasInstrument::UpdateRuneDrawFromScreenPosition(
     }
 }
 
-TArray<int32> APickupActorAAARuneCanvasInstrument::EndRuneDraw(APlayerController* UsingController)
+TArray<int32> APickupActorAAARuneCanvasInstrument::EndRuneDraw(APlayerController *UsingController)
 {
     (void)UsingController;
 
@@ -336,8 +449,8 @@ void APickupActorAAARuneCanvasInstrument::ResetRuneState()
 }
 
 void APickupActorAAARuneCanvasInstrument::CommitRuneSequenceAuthority(
-    const TArray<int32>& NodeSequence,
-    AActor* SolvingActor)
+    const TArray<int32> &NodeSequence,
+    AActor *SolvingActor)
 {
     if (!HasAuthority())
     {
@@ -355,8 +468,8 @@ void APickupActorAAARuneCanvasInstrument::CommitRuneSequenceAuthority(
     LogCurrentCardAndUserSequences(TEXT("CommitRuneSequenceAuthority"), RecognizedNodeSequence);
     ReceiveRuneCanvasDrawStateChanged(DrawnUVPoints, false);
     ReceiveRuneCanvasNodeSequenceChanged(
-    RecognizedNodeSequence,
-    RecognizedNodeSequence.Num() > 0 ? RecognizedNodeSequence.Last() : INDEX_NONE);
+        RecognizedNodeSequence,
+        RecognizedNodeSequence.Num() > 0 ? RecognizedNodeSequence.Last() : INDEX_NONE);
 
     if (bPatternSolved)
     {
@@ -416,7 +529,7 @@ void APickupActorAAARuneCanvasInstrument::CycleCardResource(int32 Direction)
     ApplyCurrentCardResourceTexture();
     ClearDrawTexture();
 
-    const TArray<int32>& ExpectedSequence = GetExpectedNodeSequenceForCurrentCard();
+    const TArray<int32> &ExpectedSequence = GetExpectedNodeSequenceForCurrentCard();
     UE_LOG(
         LogTemp,
         Warning,
@@ -429,7 +542,7 @@ void APickupActorAAARuneCanvasInstrument::LoadCardResources()
 {
     LoadedCardResources.Reset();
 
-    IAssetRegistry& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
+    IAssetRegistry &AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
 
     FARFilter Filter;
     Filter.PackagePaths.Add(FName(*CardResourceScanPath));
@@ -439,7 +552,7 @@ void APickupActorAAARuneCanvasInstrument::LoadCardResources()
     AssetRegistry.GetAssets(Filter, Assets);
 
     TArray<TPair<int32, TWeakObjectPtr<UObject>>> IndexedResources;
-    for (const FAssetData& Asset : Assets)
+    for (const FAssetData &Asset : Assets)
     {
         int32 ResourceIndex = INDEX_NONE;
         if (!TryParseCardResourceIndex(Asset.AssetName.ToString(), ResourceIndex))
@@ -447,7 +560,7 @@ void APickupActorAAARuneCanvasInstrument::LoadCardResources()
             continue;
         }
 
-        UObject* Resource = Asset.GetAsset();
+        UObject *Resource = Asset.GetAsset();
         if (!Resource || (!Resource->IsA<UTexture2D>() && !Resource->IsA<UMaterialInterface>()))
         {
             continue;
@@ -456,14 +569,12 @@ void APickupActorAAARuneCanvasInstrument::LoadCardResources()
         IndexedResources.Emplace(ResourceIndex, Resource);
     }
 
-    IndexedResources.Sort([](const TPair<int32, TWeakObjectPtr<UObject>>& A, const TPair<int32, TWeakObjectPtr<UObject>>& B)
-    {
-        return A.Key < B.Key;
-    });
+    IndexedResources.Sort([](const TPair<int32, TWeakObjectPtr<UObject>> &A, const TPair<int32, TWeakObjectPtr<UObject>> &B)
+                          { return A.Key < B.Key; });
 
-    for (const TPair<int32, TWeakObjectPtr<UObject>>& Entry : IndexedResources)
+    for (const TPair<int32, TWeakObjectPtr<UObject>> &Entry : IndexedResources)
     {
-        if (UObject* Resource = Entry.Value.Get())
+        if (UObject *Resource = Entry.Value.Get())
         {
             LoadedCardResources.Add(Resource);
         }
@@ -491,7 +602,7 @@ void APickupActorAAARuneCanvasInstrument::ApplyCurrentCardResourceTexture()
         return;
     }
 
-    UObject* CardResource = LoadedCardResources.IsValidIndex(CurrentCardResourceIndex)
+    UObject *CardResource = LoadedCardResources.IsValidIndex(CurrentCardResourceIndex)
                                 ? LoadedCardResources[CurrentCardResourceIndex].Get()
                                 : nullptr;
     if (!CardResource)
@@ -499,7 +610,7 @@ void APickupActorAAARuneCanvasInstrument::ApplyCurrentCardResourceTexture()
         return;
     }
 
-    if (UMaterialInterface* CardMaterial = Cast<UMaterialInterface>(CardResource))
+    if (UMaterialInterface *CardMaterial = Cast<UMaterialInterface>(CardResource))
     {
         CardDynamicMaterial = MeshComponent->CreateDynamicMaterialInstance(
             FMath::Max(0, CardMaterialSlotIndex),
@@ -512,7 +623,7 @@ void APickupActorAAARuneCanvasInstrument::ApplyCurrentCardResourceTexture()
         return;
     }
 
-    if (UTexture2D* CardTexture = Cast<UTexture2D>(CardResource))
+    if (UTexture2D *CardTexture = Cast<UTexture2D>(CardResource))
     {
         CardDynamicMaterial->SetTextureParameterValue(CardResourceTextureParameterName, CardTexture);
     }
@@ -520,19 +631,29 @@ void APickupActorAAARuneCanvasInstrument::ApplyCurrentCardResourceTexture()
     UpdateActivationVisualState();
 }
 
-const TArray<int32>& APickupActorAAARuneCanvasInstrument::GetExpectedNodeSequenceForCurrentCard() const
+const TArray<int32> &APickupActorAAARuneCanvasInstrument::GetExpectedNodeSequenceForCurrentCard() const
 {
     static const TArray<int32> EmptySequence;
-    const TArray<TArray<int32>>& ExpectedSequences = GetHardcodedCardExpectedSequences();
+    const TArray<TArray<int32>> &ExpectedSequences = GetHardcodedCardExpectedSequences();
     return ExpectedSequences.IsValidIndex(CurrentCardResourceIndex)
                ? ExpectedSequences[CurrentCardResourceIndex]
                : EmptySequence;
 }
 
+bool APickupActorAAARuneCanvasInstrument::CanParticipateInCanvasLinks() const
+{
+    return bAttachedToSurface && !IsHeldByPlayer() && !IsDisabledByRage();
+}
+
+float APickupActorAAARuneCanvasInstrument::GetConfiguredCanvasLinkDistance() const
+{
+    return LinkDistance;
+}
+
 // --- CalculateNodeSequenceSimilarityPercent ---
 float APickupActorAAARuneCanvasInstrument::CalculateNodeSequenceSimilarityPercent(
-    const TArray<int32>& ExpectedNodeSequence,
-    const TArray<int32>& UserNodeSequence) const
+    const TArray<int32> &ExpectedNodeSequence,
+    const TArray<int32> &UserNodeSequence) const
 {
     if (ExpectedNodeSequence.Num() == 0 || UserNodeSequence.Num() == 0)
     {
@@ -551,8 +672,8 @@ float APickupActorAAARuneCanvasInstrument::CalculateNodeSequenceSimilarityPercen
 
 // --- CalculateBidirectionalCoverageScore ---
 float APickupActorAAARuneCanvasInstrument::CalculateBidirectionalCoverageScore(
-    const TArray<int32>& SourceNodeSequence,
-    const TArray<int32>& TargetNodeSequence) const
+    const TArray<int32> &SourceNodeSequence,
+    const TArray<int32> &TargetNodeSequence) const
 {
     if (SourceNodeSequence.Num() == 0 || TargetNodeSequence.Num() == 0)
     {
@@ -578,8 +699,8 @@ float APickupActorAAARuneCanvasInstrument::CalculateBidirectionalCoverageScore(
 
 // --- CalculateWeightedEditSimilarityScore ---
 float APickupActorAAARuneCanvasInstrument::CalculateWeightedEditSimilarityScore(
-    const TArray<int32>& ExpectedNodeSequence,
-    const TArray<int32>& UserNodeSequence) const
+    const TArray<int32> &ExpectedNodeSequence,
+    const TArray<int32> &UserNodeSequence) const
 {
     const int32 ExpectedCount = ExpectedNodeSequence.Num();
     const int32 UserCount = UserNodeSequence.Num();
@@ -641,8 +762,7 @@ float APickupActorAAARuneCanvasInstrument::CalculateNodeDistanceInCells(int32 No
     int32 RowB = INDEX_NONE;
     int32 ColumnB = INDEX_NONE;
 
-    if (!GetHiddenNodeCoordinatesForId(NodeA, RowA, ColumnA)
-        || !GetHiddenNodeCoordinatesForId(NodeB, RowB, ColumnB))
+    if (!GetHiddenNodeCoordinatesForId(NodeA, RowA, ColumnA) || !GetHiddenNodeCoordinatesForId(NodeB, RowB, ColumnB))
     {
         return SimilarityToleranceCells;
     }
@@ -653,10 +773,10 @@ float APickupActorAAARuneCanvasInstrument::CalculateNodeDistanceInCells(int32 No
 }
 
 void APickupActorAAARuneCanvasInstrument::LogCurrentCardAndUserSequences(
-    const TCHAR* Context,
-    const TArray<int32>& UserNodeSequence) const
+    const TCHAR *Context,
+    const TArray<int32> &UserNodeSequence) const
 {
-    const TArray<int32>& ExpectedSequence = GetExpectedNodeSequenceForCurrentCard();
+    const TArray<int32> &ExpectedSequence = GetExpectedNodeSequenceForCurrentCard();
     const float SimilarityPercent = CalculateNodeSequenceSimilarityPercent(ExpectedSequence, UserNodeSequence);
     UE_LOG(
         LogTemp,
@@ -739,7 +859,85 @@ void APickupActorAAARuneCanvasInstrument::RestoreDefaultThrowableCollision()
     MeshComponent->BodyInstance.bUseCCD = true;
 }
 
-void APickupActorAAARuneCanvasInstrument::StickToImpact(const FHitResult& Hit, UPrimitiveComponent* HitComponent)
+void APickupActorAAARuneCanvasInstrument::UpdateThrownAttachTrace()
+{
+    if (!bAwaitingThrowImpact || bAttachedToSurface || !MeshComponent || !MeshComponent->IsSimulatingPhysics())
+    {
+        LastAttachTraceLocation = GetActorLocation();
+        return;
+    }
+
+    UWorld *World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+
+    const FVector CurrentLocation = GetActorLocation();
+    FVector TraceStart = LastAttachTraceLocation.IsNearlyZero() ? CurrentLocation : LastAttachTraceLocation;
+    FVector TraceEnd = CurrentLocation;
+
+    const FVector Velocity = MeshComponent->GetPhysicsLinearVelocity();
+    if (!Velocity.IsNearlyZero())
+    {
+        TraceEnd += Velocity.GetSafeNormal() * AttachTraceForwardPadding;
+    }
+
+    if (FVector::DistSquared(TraceStart, TraceEnd) <= FMath::Square(1.f))
+    {
+        LastAttachTraceLocation = CurrentLocation;
+        return;
+    }
+
+    FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(RuneCanvasAttachTrace), false, this);
+    QueryParams.AddIgnoredActor(this);
+    if (AActor *OwnerActor = GetOwner())
+    {
+        QueryParams.AddIgnoredActor(OwnerActor);
+    }
+    if (AActor *InstigatorActor = GetInstigator())
+    {
+        QueryParams.AddIgnoredActor(InstigatorActor);
+    }
+
+    FCollisionObjectQueryParams ObjectQueryParams;
+    ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldStatic);
+    ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldDynamic);
+    ObjectQueryParams.AddObjectTypesToQuery(ECC_PhysicsBody);
+
+    FHitResult TraceHit;
+    const bool bHit = World->SweepSingleByObjectType(
+        TraceHit,
+        TraceStart,
+        TraceEnd,
+        FQuat::Identity,
+        ObjectQueryParams,
+        FCollisionShape::MakeSphere(FMath::Max(1.f, AttachTraceRadius)),
+        QueryParams);
+
+    LastAttachTraceLocation = CurrentLocation;
+
+    if (!bHit || !TraceHit.bBlockingHit)
+    {
+        return;
+    }
+
+    UPrimitiveComponent *HitComponent = TraceHit.GetComponent();
+    if (!IsValid(HitComponent))
+    {
+        return;
+    }
+
+    StickToImpact(TraceHit, HitComponent);
+    bAttachedToSurface = true;
+    UpdateActivationVisualState();
+    LinkRefreshAccumulator = LinkRefreshInterval;
+    RefreshCanvasLinks();
+
+    UE_LOG(LogTemp, Log, TEXT("%s rune canvas attached by trace to %s"), *GetName(), *GetNameSafe(TraceHit.GetActor()));
+}
+
+void APickupActorAAARuneCanvasInstrument::StickToImpact(const FHitResult &Hit, UPrimitiveComponent *HitComponent)
 {
     bAwaitingThrowImpact = false;
 
@@ -789,7 +987,7 @@ void APickupActorAAARuneCanvasInstrument::StickToImpact(const FHitResult& Hit, U
 void APickupActorAAARuneCanvasInstrument::UpdateActivationVisualState()
 {
     const bool bShouldGlow = bAttachedToSurface;
-    const UWorld* World = GetWorld();
+    const UWorld *World = GetWorld();
 
     if (HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject) || !World || !World->IsGameWorld())
     {
@@ -827,7 +1025,7 @@ void APickupActorAAARuneCanvasInstrument::UpdateActivationVisualState()
     const int32 MaterialSlotCount = MeshComponent->GetNumMaterials();
     for (int32 MaterialIndex = 0; MaterialIndex < MaterialSlotCount; ++MaterialIndex)
     {
-        UMaterialInstanceDynamic* DynamicMaterial = nullptr;
+        UMaterialInstanceDynamic *DynamicMaterial = nullptr;
         if (MaterialIndex == FMath::Max(0, CardMaterialSlotIndex) && IsValid(CardDynamicMaterial))
         {
             DynamicMaterial = CardDynamicMaterial;
@@ -837,7 +1035,7 @@ void APickupActorAAARuneCanvasInstrument::UpdateActivationVisualState()
             DynamicMaterial = Cast<UMaterialInstanceDynamic>(MeshComponent->GetMaterial(MaterialIndex));
             if (!IsValid(DynamicMaterial))
             {
-                UMaterialInterface* BaseMaterial = MeshComponent->GetMaterial(MaterialIndex);
+                UMaterialInterface *BaseMaterial = MeshComponent->GetMaterial(MaterialIndex);
                 if (!BaseMaterial)
                 {
                     continue;
@@ -869,13 +1067,185 @@ void APickupActorAAARuneCanvasInstrument::UpdateActivationVisualState()
     }
 }
 
+void APickupActorAAARuneCanvasInstrument::RefreshCanvasLinks()
+{
+    UWorld* World = GetWorld();
+    if (!World || !CanParticipateInCanvasLinks())
+    {
+        ClearChainLinks();
+        return;
+    }
+
+    TArray<APickupActorAAARuneCanvasInstrument*> AllCanvases;
+    GatherAttachedRuneCanvases(World, AllCanvases);
+
+    TArray<TPair<FVector, FVector>> LinkEdges;
+    const FString ThisPathName = GetPathName();
+    const FVector ThisAnchor = GetCanvasLinkAnchorLocation(this);
+
+    for (APickupActorAAARuneCanvasInstrument* Candidate : AllCanvases)
+    {
+        if (!IsValid(Candidate) || Candidate == this || !AreCanvasesLinked(this, Candidate))
+        {
+            continue;
+        }
+
+        if (ThisPathName > Candidate->GetPathName())
+        {
+            continue;
+        }
+
+        AddUniqueCanvasEdge(LinkEdges, ThisAnchor, GetCanvasLinkAnchorLocation(Candidate));
+    }
+
+    RebuildChainLinks(LinkEdges);
+}
+
+void APickupActorAAARuneCanvasInstrument::RebuildChainLinks(const TArray<TPair<FVector, FVector>>& LinkEdges)
+{
+    ClearChainLinks();
+
+    if (!bRenderLinkChains || !CanvasLinkRootComponent || !ChainLinkMesh || LinkEdges.IsEmpty())
+    {
+        return;
+    }
+
+    const float SafeSpacing = FMath::Max(1.f, ChainLinkSpacing);
+
+    for (const TPair<FVector, FVector>& LinkEdge : LinkEdges)
+    {
+        const FVector StartWorld = LinkEdge.Key;
+        const FVector EndWorld = LinkEdge.Value;
+        const FVector Delta = EndWorld - StartWorld;
+        const float Distance = Delta.Size();
+        if (Distance <= UE_KINDA_SMALL_NUMBER)
+        {
+            continue;
+        }
+
+        const FVector Direction = Delta / Distance;
+        const int32 ChainLinkCount = FMath::Max(1, FMath::CeilToInt(Distance / SafeSpacing));
+        const float StepDistance = Distance / static_cast<float>(ChainLinkCount);
+        const FRotator BaseRotation = Direction.Rotation() + ChainLinkRotationOffset;
+
+        for (int32 ChainLinkIndex = 0; ChainLinkIndex < ChainLinkCount; ++ChainLinkIndex)
+        {
+            UStaticMeshComponent* ChainLinkComponent = NewObject<UStaticMeshComponent>(this);
+            if (!ChainLinkComponent)
+            {
+                continue;
+            }
+
+            FRotator ChainRotation = BaseRotation;
+            if (bAlternateChainLinkRoll && (ChainLinkIndex % 2) == 1)
+            {
+                ChainRotation.Roll += AlternateChainLinkRollDegrees;
+            }
+
+            const FVector ChainLocation = StartWorld + Direction * ((static_cast<float>(ChainLinkIndex) + 0.5f) * StepDistance);
+
+            ChainLinkComponent->SetupAttachment(CanvasLinkRootComponent);
+            ChainLinkComponent->SetMobility(EComponentMobility::Movable);
+            ChainLinkComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+            ChainLinkComponent->SetGenerateOverlapEvents(false);
+            ChainLinkComponent->SetCanEverAffectNavigation(false);
+            ChainLinkComponent->SetCastShadow(false);
+            ChainLinkComponent->SetVisibleInRayTracing(false);
+            ChainLinkComponent->SetStaticMesh(ChainLinkMesh);
+            ChainLinkComponent->RegisterComponent();
+            ChainLinkComponent->SetWorldLocationAndRotation(ChainLocation, ChainRotation);
+            ChainLinkComponent->SetWorldScale3D(ChainLinkScale);
+
+            const int32 MaterialSlotCount = FMath::Max(ChainLinkMesh->GetStaticMaterials().Num(), 1);
+            for (int32 MaterialIndex = 0; MaterialIndex < MaterialSlotCount; ++MaterialIndex)
+            {
+                UMaterialInterface* BaseMaterial = ChainLinkMaterialOverride
+                    ? ChainLinkMaterialOverride.Get()
+                    : ChainLinkComponent->GetMaterial(MaterialIndex);
+
+                if (!BaseMaterial)
+                {
+                    continue;
+                }
+
+                UMaterialInstanceDynamic* DynamicMaterial = UMaterialInstanceDynamic::Create(BaseMaterial, this);
+                if (!DynamicMaterial)
+                {
+                    continue;
+                }
+
+                DynamicMaterial->SetVectorParameterValue(LinkColorParameterName, LinkGlowColor);
+                DynamicMaterial->SetVectorParameterValue(TEXT("EmissiveColor"), LinkGlowColor);
+                DynamicMaterial->SetScalarParameterValue(LinkGlowScalarParameterName, LinkGlowIntensity);
+                DynamicMaterial->SetScalarParameterValue(TEXT("EmissiveIntensity"), LinkGlowIntensity);
+                DynamicMaterial->SetScalarParameterValue(TEXT("EmissiveStrength"), LinkGlowIntensity);
+                DynamicMaterial->SetScalarParameterValue(LinkPulseScalarParameterName, bAnimateLinkPulse ? LinkPulseMax : 1.f);
+                DynamicMaterial->SetScalarParameterValue(TEXT("EmissivePulse"), bAnimateLinkPulse ? LinkPulseMax : 1.f);
+
+                ChainLinkComponent->SetMaterial(MaterialIndex, DynamicMaterial);
+                ActiveChainLinkMaterialInstances.Add(DynamicMaterial);
+            }
+
+            ActiveChainLinkComponents.Add(ChainLinkComponent);
+        }
+    }
+}
+
+void APickupActorAAARuneCanvasInstrument::ClearChainLinks()
+{
+    for (UStaticMeshComponent* ChainLinkComponent : ActiveChainLinkComponents)
+    {
+        if (IsValid(ChainLinkComponent))
+        {
+            ChainLinkComponent->DestroyComponent();
+        }
+    }
+
+    ActiveChainLinkComponents.Reset();
+    ActiveChainLinkMaterialInstances.Reset();
+}
+
+void APickupActorAAARuneCanvasInstrument::UpdateChainLinkPulseVisuals(float DeltaTime)
+{
+    if (ActiveChainLinkMaterialInstances.IsEmpty())
+    {
+        LinkPulseTimeAccumulator = 0.f;
+        return;
+    }
+
+    float PulseValue = 1.f;
+    float EffectiveGlowIntensity = LinkGlowIntensity;
+    if (bAnimateLinkPulse)
+    {
+        LinkPulseTimeAccumulator += DeltaTime * FMath::Max(LinkPulseSpeed, 0.f);
+        const float PulseAlpha = (FMath::Sin(LinkPulseTimeAccumulator) + 1.f) * 0.5f;
+        PulseValue = FMath::Lerp(LinkPulseMin, LinkPulseMax, PulseAlpha);
+        EffectiveGlowIntensity = LinkGlowIntensity * FMath::Max(PulseValue, 0.f);
+    }
+
+    for (UMaterialInstanceDynamic* DynamicMaterial : ActiveChainLinkMaterialInstances)
+    {
+        if (!IsValid(DynamicMaterial))
+        {
+            continue;
+        }
+
+        DynamicMaterial->SetVectorParameterValue(LinkColorParameterName, LinkGlowColor);
+        DynamicMaterial->SetVectorParameterValue(TEXT("EmissiveColor"), LinkGlowColor);
+        DynamicMaterial->SetScalarParameterValue(LinkGlowScalarParameterName, EffectiveGlowIntensity);
+        DynamicMaterial->SetScalarParameterValue(TEXT("EmissiveIntensity"), EffectiveGlowIntensity);
+        DynamicMaterial->SetScalarParameterValue(TEXT("EmissiveStrength"), EffectiveGlowIntensity);
+        DynamicMaterial->SetScalarParameterValue(LinkPulseScalarParameterName, PulseValue);
+        DynamicMaterial->SetScalarParameterValue(TEXT("EmissivePulse"), PulseValue);
+    }
+}
+
 bool APickupActorAAARuneCanvasInstrument::GetPreferredDrawStartScreenPosition(
-    APlayerController* PC,
-    FVector2D& OutScreenPosition) const
+    APlayerController *PC,
+    FVector2D &OutScreenPosition) const
 {
     OutScreenPosition = FVector2D::ZeroVector;
-    return PC && DrawSurfaceComponent
-        && PC->ProjectWorldLocationToScreen(DrawSurfaceComponent->GetComponentLocation(), OutScreenPosition, true);
+    return PC && DrawSurfaceComponent && PC->ProjectWorldLocationToScreen(DrawSurfaceComponent->GetComponentLocation(), OutScreenPosition, true);
 }
 
 bool APickupActorAAARuneCanvasInstrument::EnsureDrawResources()
@@ -934,9 +1304,9 @@ bool APickupActorAAARuneCanvasInstrument::EnsureDrawResources()
 
     if (CardDynamicMaterial && LoadedCardResources.Num() > 0 && !CardResourceTextureParameterName.IsNone())
     {
-        UTexture2D* CardTexture = LoadedCardResources.IsValidIndex(CurrentCardResourceIndex)
-            ? Cast<UTexture2D>(LoadedCardResources[CurrentCardResourceIndex].Get())
-            : nullptr;
+        UTexture2D *CardTexture = LoadedCardResources.IsValidIndex(CurrentCardResourceIndex)
+                                      ? Cast<UTexture2D>(LoadedCardResources[CurrentCardResourceIndex].Get())
+                                      : nullptr;
         if (CardTexture)
         {
             CardDynamicMaterial->SetTextureParameterValue(CardResourceTextureParameterName, CardTexture);
@@ -946,7 +1316,7 @@ bool APickupActorAAARuneCanvasInstrument::EnsureDrawResources()
     return DrawRenderTarget != nullptr;
 }
 
-bool APickupActorAAARuneCanvasInstrument::IsUVInsideRecognitionArea(const FVector2D& UV) const
+bool APickupActorAAARuneCanvasInstrument::IsUVInsideRecognitionArea(const FVector2D &UV) const
 {
     const FVector2D SafeAreaSize(
         FMath::Clamp(RecognitionAreaSizeUV.X, 0.01f, 1.f),
@@ -957,7 +1327,7 @@ bool APickupActorAAARuneCanvasInstrument::IsUVInsideRecognitionArea(const FVecto
     return UV.X >= AreaMin.X && UV.X <= AreaMax.X && UV.Y >= AreaMin.Y && UV.Y <= AreaMax.Y;
 }
 
-FVector2D APickupActorAAARuneCanvasInstrument::NormalizeUVToRecognitionArea(const FVector2D& UV) const
+FVector2D APickupActorAAARuneCanvasInstrument::NormalizeUVToRecognitionArea(const FVector2D &UV) const
 {
     const FVector2D SafeAreaSize(
         FMath::Clamp(RecognitionAreaSizeUV.X, 0.01f, 1.f),
@@ -969,7 +1339,7 @@ FVector2D APickupActorAAARuneCanvasInstrument::NormalizeUVToRecognitionArea(cons
         (UV.Y - AreaMin.Y) / SafeAreaSize.Y);
 }
 
-FVector2D APickupActorAAARuneCanvasInstrument::DenormalizeRecognitionAreaUV(const FVector2D& AreaUV) const
+FVector2D APickupActorAAARuneCanvasInstrument::DenormalizeRecognitionAreaUV(const FVector2D &AreaUV) const
 {
     const FVector2D SafeAreaSize(
         FMath::Clamp(RecognitionAreaSizeUV.X, 0.01f, 1.f),
@@ -979,7 +1349,7 @@ FVector2D APickupActorAAARuneCanvasInstrument::DenormalizeRecognitionAreaUV(cons
     return AreaMin + FVector2D(AreaUV.X * SafeAreaSize.X, AreaUV.Y * SafeAreaSize.Y);
 }
 
-FVector APickupActorAAARuneCanvasInstrument::GetDrawSurfaceLocalLocationFromUV(const FVector2D& UV) const
+FVector APickupActorAAARuneCanvasInstrument::GetDrawSurfaceLocalLocationFromUV(const FVector2D &UV) const
 {
     const float SafeWidth = FMath::Max(UE_KINDA_SMALL_NUMBER, DrawSurfaceSize.X);
     const float SafeHeight = FMath::Max(UE_KINDA_SMALL_NUMBER, DrawSurfaceSize.Y);
@@ -995,8 +1365,8 @@ FVector APickupActorAAARuneCanvasInstrument::GetDrawSurfaceLocalLocationFromUV(c
     const float SurfaceVertical = (RawV - 0.5f) * SafeHeight;
 
     return bSwapDrawSurfaceAxes
-        ? FVector(SurfaceHorizontal, SurfaceVertical, 0.1f)
-        : FVector(SurfaceVertical, SurfaceHorizontal, 0.1f);
+               ? FVector(SurfaceHorizontal, SurfaceVertical, 0.1f)
+               : FVector(SurfaceVertical, SurfaceHorizontal, 0.1f);
 }
 
 void APickupActorAAARuneCanvasInstrument::RebuildRecognitionGridPreview()
@@ -1011,9 +1381,9 @@ void APickupActorAAARuneCanvasInstrument::RebuildRecognitionGridPreview()
         return;
     }
 
-    UStaticMesh* PreviewMesh = RecognitionGridPreviewNodeMesh
-        ? RecognitionGridPreviewNodeMesh.Get()
-        : DefaultRecognitionGridPreviewNodeMesh.Get();
+    UStaticMesh *PreviewMesh = RecognitionGridPreviewNodeMesh
+                                   ? RecognitionGridPreviewNodeMesh.Get()
+                                   : DefaultRecognitionGridPreviewNodeMesh.Get();
     if (!PreviewMesh)
     {
         return;
@@ -1037,13 +1407,12 @@ void APickupActorAAARuneCanvasInstrument::RebuildRecognitionGridPreview()
             TPair<FVector, FVector>(FVector(MinX, CenterY, 0.12f), FVector(BorderThickness / 100.f, SizeY / 100.f, 1.f)),
             TPair<FVector, FVector>(FVector(MaxX, CenterY, 0.12f), FVector(BorderThickness / 100.f, SizeY / 100.f, 1.f)),
             TPair<FVector, FVector>(FVector(CenterX, MinY, 0.12f), FVector(SizeX / 100.f, BorderThickness / 100.f, 1.f)),
-            TPair<FVector, FVector>(FVector(CenterX, MaxY, 0.12f), FVector(SizeX / 100.f, BorderThickness / 100.f, 1.f))
-        };
+            TPair<FVector, FVector>(FVector(CenterX, MaxY, 0.12f), FVector(SizeX / 100.f, BorderThickness / 100.f, 1.f))};
 
         for (int32 BorderIndex = 0; BorderIndex < BorderTransforms.Num(); ++BorderIndex)
         {
             const FName ComponentName = *FString::Printf(TEXT("rune_canvas_preview_surface_border_%d"), BorderIndex);
-            UStaticMeshComponent* BorderComponent = NewObject<UStaticMeshComponent>(this, ComponentName);
+            UStaticMeshComponent *BorderComponent = NewObject<UStaticMeshComponent>(this, ComponentName);
             if (!BorderComponent)
             {
                 continue;
@@ -1063,9 +1432,9 @@ void APickupActorAAARuneCanvasInstrument::RebuildRecognitionGridPreview()
             BorderComponent->SetRelativeScale3D(BorderTransforms[BorderIndex].Value);
             BorderComponent->RegisterComponent();
 
-            UMaterialInterface* BorderMaterial = DrawSurfacePreviewMaterial
-                ? DrawSurfacePreviewMaterial.Get()
-                : RecognitionGridPreviewMaterial.Get();
+            UMaterialInterface *BorderMaterial = DrawSurfacePreviewMaterial
+                                                     ? DrawSurfacePreviewMaterial.Get()
+                                                     : RecognitionGridPreviewMaterial.Get();
             if (BorderMaterial)
             {
                 BorderComponent->SetMaterial(0, BorderMaterial);
@@ -1091,7 +1460,7 @@ void APickupActorAAARuneCanvasInstrument::RebuildRecognitionGridPreview()
         {
             const int32 NodeId = GetHiddenNodeId(RowIndex, ColumnIndex);
             const FName ComponentName = *FString::Printf(TEXT("rune_canvas_preview_node_%d"), NodeId);
-            UStaticMeshComponent* PreviewComponent = NewObject<UStaticMeshComponent>(this, ComponentName);
+            UStaticMeshComponent *PreviewComponent = NewObject<UStaticMeshComponent>(this, ComponentName);
             if (!PreviewComponent)
             {
                 continue;
@@ -1128,8 +1497,8 @@ void APickupActorAAARuneCanvasInstrument::RebuildRecognitionGridPreview()
 
 void APickupActorAAARuneCanvasInstrument::ClearRecognitionGridPreview()
 {
-    TArray<UStaticMeshComponent*> ComponentsToDestroy;
-    for (UStaticMeshComponent* PreviewComponent : RecognitionGridPreviewComponents)
+    TArray<UStaticMeshComponent *> ComponentsToDestroy;
+    for (UStaticMeshComponent *PreviewComponent : RecognitionGridPreviewComponents)
     {
         if (IsValid(PreviewComponent))
         {
@@ -1139,19 +1508,18 @@ void APickupActorAAARuneCanvasInstrument::ClearRecognitionGridPreview()
 
     if (ComponentsToDestroy.Num() == 0)
     {
-        TArray<UStaticMeshComponent*> AttachedStaticMeshes;
+        TArray<UStaticMeshComponent *> AttachedStaticMeshes;
         GetComponents<UStaticMeshComponent>(AttachedStaticMeshes);
-        for (UStaticMeshComponent* StaticMeshComponent : AttachedStaticMeshes)
+        for (UStaticMeshComponent *StaticMeshComponent : AttachedStaticMeshes)
         {
-            if (IsValid(StaticMeshComponent)
-                && StaticMeshComponent->ComponentHasTag(FName("GeneratedRuneCanvasRecognitionPreview")))
+            if (IsValid(StaticMeshComponent) && StaticMeshComponent->ComponentHasTag(FName("GeneratedRuneCanvasRecognitionPreview")))
             {
                 ComponentsToDestroy.Add(StaticMeshComponent);
             }
         }
     }
 
-    for (UStaticMeshComponent* PreviewComponent : ComponentsToDestroy)
+    for (UStaticMeshComponent *PreviewComponent : ComponentsToDestroy)
     {
         if (IsValid(PreviewComponent) && PreviewComponent != MeshComponent)
         {
@@ -1169,7 +1537,7 @@ void APickupActorAAARuneCanvasInstrument::DrawRecognitionGridGuide()
         return;
     }
 
-    UCanvas* Canvas = nullptr;
+    UCanvas *Canvas = nullptr;
     FVector2D CanvasSize = FVector2D::ZeroVector;
     FDrawToRenderTargetContext DrawContext;
     UKismetRenderingLibrary::BeginDrawCanvasToRenderTarget(this, DrawRenderTarget, Canvas, CanvasSize, DrawContext);
@@ -1221,11 +1589,10 @@ void APickupActorAAARuneCanvasInstrument::DrawRecognitionGridGuide()
     UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(this, DrawContext);
 }
 
-
 bool APickupActorAAARuneCanvasInstrument::ResolveDrawUVFromScreenPosition(
-    APlayerController* UsingController,
-    const FVector2D& ScreenPosition,
-    FVector2D& OutUV) const
+    APlayerController *UsingController,
+    const FVector2D &ScreenPosition,
+    FVector2D &OutUV) const
 {
     OutUV = FVector2D::ZeroVector;
     if (!UsingController || !DrawSurfaceComponent)
@@ -1264,8 +1631,8 @@ bool APickupActorAAARuneCanvasInstrument::ResolveDrawUVFromScreenPosition(
     return ResolveDrawUVFromWorldLocation(RayOrigin + RayDirection * DistanceAlongRay, OutUV);
 }
 bool APickupActorAAARuneCanvasInstrument::ResolveDrawUVFromWorldLocation(
-    const FVector& WorldLocation,
-    FVector2D& OutUV) const
+    const FVector &WorldLocation,
+    FVector2D &OutUV) const
 {
     OutUV = FVector2D::ZeroVector;
     if (!DrawSurfaceComponent)
@@ -1303,9 +1670,9 @@ bool APickupActorAAARuneCanvasInstrument::ResolveDrawUVFromWorldLocation(
 }
 
 bool APickupActorAAARuneCanvasInstrument::ResolveDrawUVFromMouseTrace(
-    APlayerController* UsingController,
-    const FVector2D& ScreenPosition,
-    FVector2D& OutUV) const
+    APlayerController *UsingController,
+    const FVector2D &ScreenPosition,
+    FVector2D &OutUV) const
 {
     OutUV = FVector2D::ZeroVector;
     if (!UsingController || !MeshComponent)
@@ -1320,7 +1687,7 @@ bool APickupActorAAARuneCanvasInstrument::ResolveDrawUVFromMouseTrace(
         return false;
     }
 
-    UWorld* World = GetWorld();
+    UWorld *World = GetWorld();
     if (!World)
     {
         return false;
@@ -1328,7 +1695,7 @@ bool APickupActorAAARuneCanvasInstrument::ResolveDrawUVFromMouseTrace(
 
     FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(RuneCanvasMouseTrace), true);
     QueryParams.bReturnFaceIndex = true;
-    if (APawn* Pawn = UsingController->GetPawn())
+    if (APawn *Pawn = UsingController->GetPawn())
     {
         QueryParams.AddIgnoredActor(Pawn);
     }
@@ -1340,9 +1707,9 @@ bool APickupActorAAARuneCanvasInstrument::ResolveDrawUVFromMouseTrace(
         return false;
     }
 
-    for (const FHitResult& HitResult : HitResults)
+    for (const FHitResult &HitResult : HitResults)
     {
-        const UActorComponent* HitComponent = HitResult.GetComponent();
+        const UActorComponent *HitComponent = HitResult.GetComponent();
         // 确保击中点属于当前 Actor 或其组件
         if (HitResult.GetActor() != this && (!HitComponent || HitComponent->GetOwner() != this))
         {
@@ -1378,7 +1745,7 @@ bool APickupActorAAARuneCanvasInstrument::ResolveDrawUVFromMouseTrace(
     return false;
 }
 
-void APickupActorAAARuneCanvasInstrument::AddDrawPoint(const FVector2D& UV)
+void APickupActorAAARuneCanvasInstrument::AddDrawPoint(const FVector2D &UV)
 {
     if (DrawnUVPoints.Num() > 0 && bCanConnectNextDrawPoint)
     {
@@ -1394,14 +1761,14 @@ void APickupActorAAARuneCanvasInstrument::AddDrawPoint(const FVector2D& UV)
     ReceiveRuneCanvasDrawStateChanged(DrawnUVPoints, bRuneDrawActive);
 }
 
-void APickupActorAAARuneCanvasInstrument::DrawStrokeSegment(const FVector2D& StartUV, const FVector2D& EndUV)
+void APickupActorAAARuneCanvasInstrument::DrawStrokeSegment(const FVector2D &StartUV, const FVector2D &EndUV)
 {
     if (!EnsureDrawResources() || !DrawRenderTarget)
     {
         return;
     }
 
-    UCanvas* Canvas = nullptr;
+    UCanvas *Canvas = nullptr;
     FVector2D CanvasSize = FVector2D::ZeroVector;
     FDrawToRenderTargetContext DrawContext;
     UKismetRenderingLibrary::BeginDrawCanvasToRenderTarget(this, DrawRenderTarget, Canvas, CanvasSize, DrawContext);
@@ -1428,7 +1795,7 @@ void APickupActorAAARuneCanvasInstrument::DrawStrokeSegment(const FVector2D& Sta
     UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(this, DrawContext);
 }
 
-int32 APickupActorAAARuneCanvasInstrument::ResolveHiddenNodeFromUV(const FVector2D& UV) const
+int32 APickupActorAAARuneCanvasInstrument::ResolveHiddenNodeFromUV(const FVector2D &UV) const
 {
     if (!IsUVInsideRecognitionArea(UV))
     {
@@ -1449,11 +1816,11 @@ int32 APickupActorAAARuneCanvasInstrument::ResolveHiddenNodeFromUV(const FVector
     }
 
     const int32 ColumnIndex = SafeColumns == 1
-        ? 0
-        : FMath::RoundToInt(NormalizedColumn * static_cast<float>(SafeColumns - 1));
+                                  ? 0
+                                  : FMath::RoundToInt(NormalizedColumn * static_cast<float>(SafeColumns - 1));
     const int32 RowIndex = SafeRows == 1
-        ? 0
-        : FMath::RoundToInt(NormalizedRow * static_cast<float>(SafeRows - 1));
+                               ? 0
+                               : FMath::RoundToInt(NormalizedRow * static_cast<float>(SafeRows - 1));
 
     const FVector2D AreaNodeUV(
         SafeColumns == 1 ? 0.5f : SafePadding + (static_cast<float>(ColumnIndex) / static_cast<float>(SafeColumns - 1)) * Span,
@@ -1469,8 +1836,8 @@ int32 APickupActorAAARuneCanvasInstrument::ResolveHiddenNodeFromUV(const FVector
 
 bool APickupActorAAARuneCanvasInstrument::GetHiddenNodeCoordinatesForId(
     int32 NodeId,
-    int32& OutRow,
-    int32& OutColumn) const
+    int32 &OutRow,
+    int32 &OutColumn) const
 {
     OutRow = INDEX_NONE;
     OutColumn = INDEX_NONE;
@@ -1542,8 +1909,7 @@ void APickupActorAAARuneCanvasInstrument::AppendInterpolatedNodesBetween(int32 F
     int32 ToRow = INDEX_NONE;
     int32 ToColumn = INDEX_NONE;
 
-    if (!GetHiddenNodeCoordinatesForId(FromNodeId, FromRow, FromColumn)
-        || !GetHiddenNodeCoordinatesForId(ToNodeId, ToRow, ToColumn))
+    if (!GetHiddenNodeCoordinatesForId(FromNodeId, FromRow, FromColumn) || !GetHiddenNodeCoordinatesForId(ToNodeId, ToRow, ToColumn))
     {
         TryAppendSingleRecognizedNode(ToNodeId);
         return;
@@ -1593,7 +1959,7 @@ FString APickupActorAAARuneCanvasInstrument::BuildRecognizedNodeSequenceString()
     return Result;
 }
 
-void APickupActorAAARuneCanvasInstrument::LogRecognizedNodeSequence(const TCHAR* Context) const
+void APickupActorAAARuneCanvasInstrument::LogRecognizedNodeSequence(const TCHAR *Context) const
 {
     if (!bLogRecognizedNodeSequence)
     {
@@ -1611,14 +1977,13 @@ void APickupActorAAARuneCanvasInstrument::LogRecognizedNodeSequence(const TCHAR*
         *SolvedPatternId.ToString());
 }
 
-
 bool APickupActorAAARuneCanvasInstrument::TryResolveAcceptedPattern(
-    const TArray<int32>& NodeSequence,
-    FName& OutPatternId) const
+    const TArray<int32> &NodeSequence,
+    FName &OutPatternId) const
 {
     OutPatternId = NAME_None;
 
-    for (const FRuneCanvasPattern& Pattern : AcceptedPatterns)
+    for (const FRuneCanvasPattern &Pattern : AcceptedPatterns)
     {
         if (Pattern.NodeSequence.Num() == 0)
         {
