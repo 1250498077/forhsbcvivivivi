@@ -7,10 +7,14 @@
 class APlayerController;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
+class UPointLightComponent;
+class UPrimitiveComponent;
 class USceneComponent;
 class UStaticMesh;
 class UStaticMeshComponent;
+class UTexture2D;
 class UTextureRenderTarget2D;
+struct FHitResult;
 
 USTRUCT(BlueprintType)
 struct FRuneCanvasPattern
@@ -43,6 +47,12 @@ public:
     bool BeginRuneDraw(APlayerController* UsingController);
 
     UFUNCTION(BlueprintCallable, Category = "RuneCanvas")
+    bool BeginRuneStroke(APlayerController* UsingController, const FVector2D& ScreenPosition);
+
+    UFUNCTION(BlueprintCallable, Category = "RuneCanvas")
+    void EndRuneStroke();
+
+    UFUNCTION(BlueprintCallable, Category = "RuneCanvas")
     void UpdateRuneDrawFromScreenPosition(APlayerController* UsingController, const FVector2D& ScreenPosition);
 
     UFUNCTION(BlueprintCallable, Category = "RuneCanvas")
@@ -60,10 +70,25 @@ public:
     UFUNCTION(BlueprintCallable, Category = "RuneCanvas|RenderTarget")
     void ReinitializeDrawResources();
 
+    UFUNCTION(BlueprintCallable, Category = "RuneCanvas|Card")
+    void CycleCardResource(int32 Direction);
+
+    UFUNCTION(BlueprintPure, Category = "RuneCanvas|Card")
+    int32 GetCurrentCardResourceIndex() const
+    {
+        return CurrentCardResourceIndex;
+    }
+
     UFUNCTION(BlueprintPure, Category = "RuneCanvas")
     bool IsRuneDrawActive() const
     {
         return bRuneDrawActive;
+    }
+
+    UFUNCTION(BlueprintPure, Category = "RuneCanvas")
+    bool IsRuneStrokeActive() const
+    {
+        return bRuneStrokeActive;
     }
 
     UFUNCTION(BlueprintPure, Category = "RuneCanvas")
@@ -105,6 +130,9 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     TObjectPtr<USceneComponent> DrawSurfaceComponent;
 
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    TObjectPtr<UPointLightComponent> GlowLightComponent;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Surface")
     FVector2D DrawSurfaceSize = FVector2D(60.f, 20.f);
 
@@ -133,13 +161,16 @@ protected:
     int32 DrawTextureResolution = 1024;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|RenderTarget")
-    bool bMatchDrawTextureAspectToSurface = true;
+    bool bMatchDrawTextureAspectToSurface = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|RenderTarget")
     FLinearColor DrawTextureClearColor = FLinearColor::Transparent;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|RenderTarget")
     FName DrawTextureParameterName = TEXT("DrawTexture");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|RenderTarget")
+    FName CardResourceTextureParameterName = TEXT("BaseTexture");
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|RenderTarget")
     int32 CardMaterialSlotIndex = 0;
@@ -157,7 +188,7 @@ protected:
     float StrokeThicknessPixels = 10.f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Draw")
-    bool bCompensateStrokeAspectRatio = true;
+    bool bCompensateStrokeAspectRatio = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Draw", meta = (ClampMin = "0.0001", ClampMax = "0.25"))
     float MinDrawPointDistanceUV = 0.004f;
@@ -228,8 +259,35 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Recognition|Debug")
     bool bLogRecognizedNodeSequence = true;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Recognition|Similarity", meta = (ClampMin = "0.1", ClampMax = "20.0"))
+    float SimilarityToleranceCells = 4.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Recognition|Similarity", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float ShapeSimilarityWeight = 0.7f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Recognition|Similarity", meta = (ClampMin = "0.0", ClampMax = "2.0"))
+    float ExtraUserNodeCost = 0.6f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Recognition|Similarity", meta = (ClampMin = "0.0", ClampMax = "2.0"))
+    float MissingExpectedNodeCost = 0.8f;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Patterns", meta = (TitleProperty = "PatternId"))
     TArray<FRuneCanvasPattern> AcceptedPatterns;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Attach", meta = (ClampMin = "0.0"))
+    float AttachSurfacePadding = 1.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Visual")
+    FLinearColor ActivationGlowColor = FLinearColor(0.12f, 0.85f, 1.f, 1.f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Visual", meta = (ClampMin = "0.0"))
+    float ActivationGlowIntensity = 8.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Visual", meta = (ClampMin = "0.0"))
+    float ActivationLightIntensity = 2800.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Visual", meta = (ClampMin = "50.0"))
+    float ActivationLightRadius = 220.f;
 
     UFUNCTION(BlueprintImplementableEvent, Category = "RuneCanvas|Visual")
     void ReceiveRuneCanvasDrawStateChanged(const TArray<FVector2D>& ActiveUVPoints, bool bDrawingActive);
@@ -248,6 +306,9 @@ private:
     TObjectPtr<UMaterialInstanceDynamic> CardDynamicMaterial = nullptr;
 
     UPROPERTY(Transient)
+    TArray<TObjectPtr<UObject>> LoadedCardResources;
+
+    UPROPERTY(Transient)
     TObjectPtr<UStaticMesh> DefaultRecognitionGridPreviewNodeMesh = nullptr;
 
     UPROPERTY(Transient)
@@ -256,12 +317,38 @@ private:
     TArray<FVector2D> DrawnUVPoints;
     TArray<int32> RecognizedNodeSequence;
 
+    int32 CurrentCardResourceIndex = 0;
     bool bRuneDrawActive = false;
+    bool bRuneStrokeActive = false;
     bool bPatternSolved = false;
     bool bCanConnectNextDrawPoint = false;
+    bool bCanInterpolateNextRecognizedNode = false;
+    bool bAwaitingThrowImpact = false;
+    bool bAttachedToSurface = false;
     FName SolvedPatternId = NAME_None;
 
+    UFUNCTION()
+    void HandleRuneCanvasHit(
+        UPrimitiveComponent* HitComponent,
+        AActor* OtherActor,
+        UPrimitiveComponent* OtherComp,
+        FVector NormalImpulse,
+        const FHitResult& Hit);
+
+
     bool EnsureDrawResources();
+    void ApplyThrowablePhysicsTuning();
+    void RestoreDefaultThrowableCollision();
+    void StickToImpact(const FHitResult& Hit, UPrimitiveComponent* HitComponent);
+    void UpdateActivationVisualState();
+    void LoadCardResources();
+    void ApplyCurrentCardResourceTexture();
+    const TArray<int32>& GetExpectedNodeSequenceForCurrentCard() const;
+    float CalculateNodeSequenceSimilarityPercent(const TArray<int32>& ExpectedNodeSequence, const TArray<int32>& UserNodeSequence) const;
+    float CalculateBidirectionalCoverageScore(const TArray<int32>& SourceNodeSequence, const TArray<int32>& TargetNodeSequence) const;
+    float CalculateWeightedEditSimilarityScore(const TArray<int32>& ExpectedNodeSequence, const TArray<int32>& UserNodeSequence) const;
+    float CalculateNodeDistanceInCells(int32 NodeA, int32 NodeB) const;
+    void LogCurrentCardAndUserSequences(const TCHAR* Context, const TArray<int32>& UserNodeSequence) const;
     void EnableMouseTraceCollisionIfNeeded();
     void RestoreHeldCollisionAfterMouseTrace();
     bool IsUVInsideRecognitionArea(const FVector2D& UV) const;

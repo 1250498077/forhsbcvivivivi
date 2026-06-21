@@ -1,15 +1,78 @@
 #include "PickupActorAAARuneCanvasInstrument.h"
 
+#include "Components/PointLightComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/Canvas.h"
+#include "Engine/Texture2D.h"
 #include "Engine/TextureRenderTarget2D.h"
+#include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetRenderingLibrary.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "PhysicsEngine/BodyInstance.h"
+#include "AssetRegistry/AssetRegistryModule.h"
 #include "UObject/ConstructorHelpers.h"
+
+
+namespace
+{
+    const FString CardResourceScanPath = TEXT("/Game/item/canvas/cardtype");
+    const FString CardResourcePrefix = TEXT("card_resource_");
+
+    const TArray<TArray<int32>>& GetHardcodedCardExpectedSequences()
+    {
+        // card_resource_0 -> {1, 2, 3, 4}. 后续你从 log 复制后，在这里继续按下标追加。
+        static const TArray<TArray<int32>> Sequences = {
+            {380,419,418,417,416,415,414,413,412,411,410,409,408,407,406,446,447,448,449,450,451,452,453,454,455,456,457,458,459,500,501,502,503,504,505,506,507,508,465,464,463,462,421,420,378,377,376,335,334,293,292,291,251,250,210,331,372,493,533,573,613,574,575,536,537,498,499,460,461,424,425,426,427,388,389,390,391,392,353,354,355,356,357,358,319,318,317,316,315,314,313,352,351,350,349,348,347,346,345,384,383,382,381,379,375,374}
+        };
+        return Sequences;
+    }
+
+    bool TryParseCardResourceIndex(const FString& AssetName, int32& OutIndex)
+    {
+        OutIndex = INDEX_NONE;
+        if (!AssetName.StartsWith(CardResourcePrefix, ESearchCase::IgnoreCase))
+        {
+            return false;
+        }
+
+        const FString IndexString = AssetName.RightChop(CardResourcePrefix.Len());
+        if (IndexString.IsEmpty())
+        {
+            return false;
+        }
+
+        for (const TCHAR Ch : IndexString)
+        {
+            if (!FChar::IsDigit(Ch))
+            {
+                return false;
+            }
+        }
+
+        OutIndex = FCString::Atoi(*IndexString);
+        return OutIndex >= 0;
+    }
+
+    FString BuildNodeSequenceLogString(const TArray<int32>& NodeSequence)
+    {
+        FString Result = TEXT("[");
+        for (int32 Index = 0; Index < NodeSequence.Num(); ++Index)
+        {
+            if (Index > 0)
+            {
+                Result += TEXT(",");
+            }
+            Result += FString::FromInt(NodeSequence[Index]);
+        }
+        Result += TEXT("]");
+        return Result;
+    }
+}
+
 
 APickupActorAAARuneCanvasInstrument::APickupActorAAARuneCanvasInstrument()
 {
@@ -33,8 +96,26 @@ APickupActorAAARuneCanvasInstrument::APickupActorAAARuneCanvasInstrument()
     Tags.Add(FName("Pickup"));
     Tags.Add(FName("Rune"));
 
+    if (MeshComponent)
+    {
+        MeshComponent->SetNotifyRigidBodyCollision(true);
+        MeshComponent->BodyInstance.bUseCCD = true;
+        MeshComponent->OnComponentHit.AddDynamic(this, &APickupActorAAARuneCanvasInstrument::HandleRuneCanvasHit);
+    }
+
     DrawSurfaceComponent = CreateDefaultSubobject<USceneComponent>(TEXT("DrawSurfaceComponent"));
     DrawSurfaceComponent->SetupAttachment(VisualMeshRootComponent);
+
+    GlowLightComponent = CreateDefaultSubobject<UPointLightComponent>(TEXT("GlowLightComponent"));
+    GlowLightComponent->SetupAttachment(MeshComponent);
+    GlowLightComponent->SetCastShadows(false);
+    GlowLightComponent->SetUseInverseSquaredFalloff(false);
+    GlowLightComponent->SetLightColor(ActivationGlowColor);
+    GlowLightComponent->SetIntensity(0.f);
+    GlowLightComponent->SetAttenuationRadius(ActivationLightRadius);
+    GlowLightComponent->SetVisibility(false);
+    GlowLightComponent->SetHiddenInGame(true);
+    GlowLightComponent->SetCanEverAffectNavigation(false);
 
     static ConstructorHelpers::FObjectFinder<UStaticMesh> DefaultPlaneMesh(TEXT("/Engine/BasicShapes/Plane.Plane"));
     if (DefaultPlaneMesh.Succeeded())
@@ -48,41 +129,95 @@ void APickupActorAAARuneCanvasInstrument::BeginPlay()
 {
     Super::BeginPlay();
     RebuildRecognitionGridPreview();
+    LoadCardResources();
     EnsureDrawResources();
+    ApplyThrowablePhysicsTuning();
+    ApplyCurrentCardResourceTexture();
+    UpdateActivationVisualState();
 }
 
 void APickupActorAAARuneCanvasInstrument::OnConstruction(const FTransform& Transform)
 {
-    Super::OnConstruction(Transform);RebuildRecognitionGridPreview();
+    Super::OnConstruction(Transform);
+    RebuildRecognitionGridPreview();
+    ApplyThrowablePhysicsTuning();
+
+    if (GlowLightComponent)
+    {
+        GlowLightComponent->SetHiddenInGame(true);
+        GlowLightComponent->SetVisibility(false);
+        GlowLightComponent->SetIntensity(0.f);
+    }
 }
 
 void APickupActorAAARuneCanvasInstrument::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
     DrawnUVPoints.Reset();
     RecognizedNodeSequence.Reset();
+    LoadedCardResources.Reset();
     ClearRecognitionGridPreview();
     DrawRenderTarget = nullptr;
     CardDynamicMaterial = nullptr;
+    bAwaitingThrowImpact = false;
+    bAttachedToSurface = false;
 
     Super::EndPlay(EndPlayReason);
 }
 
 void APickupActorAAARuneCanvasInstrument::OnPickedUp()
 {
+    bAwaitingThrowImpact = false;
+    bAttachedToSurface = false;
+    RestoreDefaultThrowableCollision();
     Super::OnPickedUp();
     ResetRuneState();
+    UpdateActivationVisualState();
 }
 
 void APickupActorAAARuneCanvasInstrument::OnPutDown(FVector PlaceLocation, FRotator PlaceRotation)
 {
+    bAwaitingThrowImpact = false;
+    bAttachedToSurface = false;
+    RestoreDefaultThrowableCollision();
     Super::OnPutDown(PlaceLocation, PlaceRotation);
     ResetRuneState();
+    UpdateActivationVisualState();
 }
 
 void APickupActorAAARuneCanvasInstrument::OnThrown(FVector ThrowDirection, float ThrowForce)
 {
+    bAwaitingThrowImpact = true;
+    bAttachedToSurface = false;
+    RestoreDefaultThrowableCollision();
     Super::OnThrown(ThrowDirection, ThrowForce);
     ResetRuneState();
+    UpdateActivationVisualState();
+}
+
+void APickupActorAAARuneCanvasInstrument::HandleRuneCanvasHit(
+    UPrimitiveComponent* HitComponent,
+    AActor* OtherActor,
+    UPrimitiveComponent* OtherComp,
+    FVector NormalImpulse,
+    const FHitResult& Hit)
+{
+    (void)NormalImpulse;
+
+    if (!bAwaitingThrowImpact || bAttachedToSurface || HitComponent != MeshComponent || !Hit.bBlockingHit)
+    {
+        return;
+    }
+
+    if (!IsValid(OtherActor) || OtherActor == this)
+    {
+        return;
+    }
+
+    StickToImpact(Hit, OtherComp);
+    bAttachedToSurface = true;
+    UpdateActivationVisualState();
+
+    UE_LOG(LogTemp, Log, TEXT("%s rune canvas attached to %s"), *GetName(), *GetNameSafe(OtherActor));
 }
 
 bool APickupActorAAARuneCanvasInstrument::BeginRuneDraw(APlayerController* UsingController)
@@ -93,8 +228,10 @@ bool APickupActorAAARuneCanvasInstrument::BeginRuneDraw(APlayerController* Using
     }
 
     bRuneDrawActive = true;
+    bRuneStrokeActive = false;
     bPatternSolved = false;
     bCanConnectNextDrawPoint = false;
+    bCanInterpolateNextRecognizedNode = false;
     SolvedPatternId = NAME_None;
     DrawnUVPoints.Reset();
     RecognizedNodeSequence.Reset();
@@ -110,11 +247,36 @@ bool APickupActorAAARuneCanvasInstrument::BeginRuneDraw(APlayerController* Using
     return true;
 }
 
-void APickupActorAAARuneCanvasInstrument::UpdateRuneDrawFromScreenPosition(
+bool APickupActorAAARuneCanvasInstrument::BeginRuneStroke(
     APlayerController* UsingController,
     const FVector2D& ScreenPosition)
 {
     if (!bRuneDrawActive || !UsingController)
+    {
+        return false;
+    }
+
+    bRuneStrokeActive = true;
+    bCanConnectNextDrawPoint = false;
+    bCanInterpolateNextRecognizedNode = false;
+    UpdateRuneDrawFromScreenPosition(UsingController, ScreenPosition);
+    return true;
+}
+
+// 2. 结束绘制笔触
+void APickupActorAAARuneCanvasInstrument::EndRuneStroke()
+{
+    bRuneStrokeActive = false;
+    bCanConnectNextDrawPoint = false;
+    bCanInterpolateNextRecognizedNode = false;
+}
+
+// 3. 根据屏幕位置更新绘制 
+void APickupActorAAARuneCanvasInstrument::UpdateRuneDrawFromScreenPosition(
+    APlayerController* UsingController,
+    const FVector2D& ScreenPosition)
+{
+    if (!bRuneDrawActive || !bRuneStrokeActive || !UsingController)
     {
         return;
     }
@@ -123,6 +285,7 @@ void APickupActorAAARuneCanvasInstrument::UpdateRuneDrawFromScreenPosition(
     if (!ResolveDrawUVFromScreenPosition(UsingController, ScreenPosition, UV))
     {
         bCanConnectNextDrawPoint = false;
+        bCanInterpolateNextRecognizedNode = true;
         return;
     }
 
@@ -144,12 +307,13 @@ TArray<int32> APickupActorAAARuneCanvasInstrument::EndRuneDraw(APlayerController
     }
 
     bRuneDrawActive = false;
+    EndRuneStroke();
     bCanConnectNextDrawPoint = false;
     RestoreHeldCollisionAfterMouseTrace();
     SolvedPatternId = NAME_None;
     bPatternSolved = TryResolveAcceptedPattern(RecognizedNodeSequence, SolvedPatternId);
     LogRecognizedNodeSequence(TEXT("EndRuneDraw"));
-
+    LogCurrentCardAndUserSequences(TEXT("EndRuneDraw"), RecognizedNodeSequence);
     ReceiveRuneCanvasDrawStateChanged(DrawnUVPoints, false);
 
     return RecognizedNodeSequence;
@@ -158,7 +322,9 @@ TArray<int32> APickupActorAAARuneCanvasInstrument::EndRuneDraw(APlayerController
 void APickupActorAAARuneCanvasInstrument::ResetRuneState()
 {
     bRuneDrawActive = false;
+    bRuneStrokeActive = false;
     bCanConnectNextDrawPoint = false;
+    bCanInterpolateNextRecognizedNode = false;
     RestoreHeldCollisionAfterMouseTrace();
     bPatternSolved = false;
     SolvedPatternId = NAME_None;
@@ -179,12 +345,14 @@ void APickupActorAAARuneCanvasInstrument::CommitRuneSequenceAuthority(
     }
 
     bRuneDrawActive = false;
+    bRuneStrokeActive = false;
     bCanConnectNextDrawPoint = false;
+    bCanInterpolateNextRecognizedNode = false;
     RecognizedNodeSequence = NodeSequence;
     SolvedPatternId = NAME_None;
     bPatternSolved = TryResolveAcceptedPattern(RecognizedNodeSequence, SolvedPatternId);
     LogRecognizedNodeSequence(TEXT("CommitRuneSequenceAuthority"));
-
+    LogCurrentCardAndUserSequences(TEXT("CommitRuneSequenceAuthority"), RecognizedNodeSequence);
     ReceiveRuneCanvasDrawStateChanged(DrawnUVPoints, false);
     ReceiveRuneCanvasNodeSequenceChanged(
     RecognizedNodeSequence,
@@ -210,7 +378,305 @@ void APickupActorAAARuneCanvasInstrument::ReinitializeDrawResources()
     DrawRenderTarget = nullptr;
     CardDynamicMaterial = nullptr;
     EnsureDrawResources();
+    ApplyCurrentCardResourceTexture();
     ClearDrawTexture();
+}
+
+void APickupActorAAARuneCanvasInstrument::CycleCardResource(int32 Direction)
+{
+    if (Direction == 0)
+    {
+        return;
+    }
+
+    if (bRuneDrawActive)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("RuneCanvas: cannot switch card while drawing"));
+        return;
+    }
+
+    if (LoadedCardResources.Num() == 0)
+    {
+        LoadCardResources();
+    }
+
+    if (LoadedCardResources.Num() == 0)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("RuneCanvas: no card_resource_x resources found under %s"), *CardResourceScanPath);
+        return;
+    }
+
+    const int32 ResourceCount = LoadedCardResources.Num();
+    CurrentCardResourceIndex = (CurrentCardResourceIndex + Direction) % ResourceCount;
+    if (CurrentCardResourceIndex < 0)
+    {
+        CurrentCardResourceIndex += ResourceCount;
+    }
+
+    ApplyCurrentCardResourceTexture();
+    ClearDrawTexture();
+
+    const TArray<int32>& ExpectedSequence = GetExpectedNodeSequenceForCurrentCard();
+    UE_LOG(
+        LogTemp,
+        Warning,
+        TEXT("RuneCanvas: switched to card_resource_%d, expected=%s"),
+        CurrentCardResourceIndex,
+        *BuildNodeSequenceLogString(ExpectedSequence));
+}
+
+void APickupActorAAARuneCanvasInstrument::LoadCardResources()
+{
+    LoadedCardResources.Reset();
+
+    IAssetRegistry& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
+
+    FARFilter Filter;
+    Filter.PackagePaths.Add(FName(*CardResourceScanPath));
+    Filter.bRecursivePaths = true;
+
+    TArray<FAssetData> Assets;
+    AssetRegistry.GetAssets(Filter, Assets);
+
+    TArray<TPair<int32, TWeakObjectPtr<UObject>>> IndexedResources;
+    for (const FAssetData& Asset : Assets)
+    {
+        int32 ResourceIndex = INDEX_NONE;
+        if (!TryParseCardResourceIndex(Asset.AssetName.ToString(), ResourceIndex))
+        {
+            continue;
+        }
+
+        UObject* Resource = Asset.GetAsset();
+        if (!Resource || (!Resource->IsA<UTexture2D>() && !Resource->IsA<UMaterialInterface>()))
+        {
+            continue;
+        }
+
+        IndexedResources.Emplace(ResourceIndex, Resource);
+    }
+
+    IndexedResources.Sort([](const TPair<int32, TWeakObjectPtr<UObject>>& A, const TPair<int32, TWeakObjectPtr<UObject>>& B)
+    {
+        return A.Key < B.Key;
+    });
+
+    for (const TPair<int32, TWeakObjectPtr<UObject>>& Entry : IndexedResources)
+    {
+        if (UObject* Resource = Entry.Value.Get())
+        {
+            LoadedCardResources.Add(Resource);
+        }
+    }
+
+    CurrentCardResourceIndex = FMath::Clamp(CurrentCardResourceIndex, 0, FMath::Max(0, LoadedCardResources.Num() - 1));
+
+    UE_LOG(
+        LogTemp,
+        Warning,
+        TEXT("RuneCanvas: loaded %d card_resource_x resources from %s"),
+        LoadedCardResources.Num(),
+        *CardResourceScanPath);
+}
+
+void APickupActorAAARuneCanvasInstrument::ApplyCurrentCardResourceTexture()
+{
+    if (!EnsureDrawResources() || !CardDynamicMaterial || CardResourceTextureParameterName.IsNone())
+    {
+        return;
+    }
+
+    if (LoadedCardResources.Num() == 0)
+    {
+        return;
+    }
+
+    UObject* CardResource = LoadedCardResources.IsValidIndex(CurrentCardResourceIndex)
+                                ? LoadedCardResources[CurrentCardResourceIndex].Get()
+                                : nullptr;
+    if (!CardResource)
+    {
+        return;
+    }
+
+    if (UMaterialInterface* CardMaterial = Cast<UMaterialInterface>(CardResource))
+    {
+        CardDynamicMaterial = MeshComponent->CreateDynamicMaterialInstance(
+            FMath::Max(0, CardMaterialSlotIndex),
+            CardMaterial);
+        if (CardDynamicMaterial && DrawRenderTarget && !DrawTextureParameterName.IsNone())
+        {
+            CardDynamicMaterial->SetTextureParameterValue(DrawTextureParameterName, DrawRenderTarget);
+        }
+        UpdateActivationVisualState();
+        return;
+    }
+
+    if (UTexture2D* CardTexture = Cast<UTexture2D>(CardResource))
+    {
+        CardDynamicMaterial->SetTextureParameterValue(CardResourceTextureParameterName, CardTexture);
+    }
+
+    UpdateActivationVisualState();
+}
+
+const TArray<int32>& APickupActorAAARuneCanvasInstrument::GetExpectedNodeSequenceForCurrentCard() const
+{
+    static const TArray<int32> EmptySequence;
+    const TArray<TArray<int32>>& ExpectedSequences = GetHardcodedCardExpectedSequences();
+    return ExpectedSequences.IsValidIndex(CurrentCardResourceIndex)
+               ? ExpectedSequences[CurrentCardResourceIndex]
+               : EmptySequence;
+}
+
+// --- CalculateNodeSequenceSimilarityPercent ---
+float APickupActorAAARuneCanvasInstrument::CalculateNodeSequenceSimilarityPercent(
+    const TArray<int32>& ExpectedNodeSequence,
+    const TArray<int32>& UserNodeSequence) const
+{
+    if (ExpectedNodeSequence.Num() == 0 || UserNodeSequence.Num() == 0)
+    {
+        return 0.f;
+    }
+
+    const float UserToExpectedScore = CalculateBidirectionalCoverageScore(UserNodeSequence, ExpectedNodeSequence);
+    const float ExpectedToUserScore = CalculateBidirectionalCoverageScore(ExpectedNodeSequence, UserNodeSequence);
+    const float ShapeScore = (UserToExpectedScore + ExpectedToUserScore) * 0.5f;
+    const float EditScore = CalculateWeightedEditSimilarityScore(ExpectedNodeSequence, UserNodeSequence);
+    const float SafeShapeWeight = FMath::Clamp(ShapeSimilarityWeight, 0.f, 1.f);
+    const float CombinedScore = ShapeScore * SafeShapeWeight + EditScore * (1.f - SafeShapeWeight);
+
+    return FMath::Clamp(CombinedScore, 0.f, 1.f) * 100.f;
+}
+
+// --- CalculateBidirectionalCoverageScore ---
+float APickupActorAAARuneCanvasInstrument::CalculateBidirectionalCoverageScore(
+    const TArray<int32>& SourceNodeSequence,
+    const TArray<int32>& TargetNodeSequence) const
+{
+    if (SourceNodeSequence.Num() == 0 || TargetNodeSequence.Num() == 0)
+    {
+        return 0.f;
+    }
+
+    const float SafeTolerance = FMath::Max(0.1f, SimilarityToleranceCells);
+    float TotalScore = 0.f;
+
+    for (const int32 SourceNodeId : SourceNodeSequence)
+    {
+        float BestDistance = TNumericLimits<float>::Max();
+        for (const int32 TargetNodeId : TargetNodeSequence)
+        {
+            BestDistance = FMath::Min(BestDistance, CalculateNodeDistanceInCells(SourceNodeId, TargetNodeId));
+        }
+
+        TotalScore += 1.f - FMath::Clamp(BestDistance / SafeTolerance, 0.f, 1.f);
+    }
+
+    return TotalScore / static_cast<float>(SourceNodeSequence.Num());
+}
+
+// --- CalculateWeightedEditSimilarityScore ---
+float APickupActorAAARuneCanvasInstrument::CalculateWeightedEditSimilarityScore(
+    const TArray<int32>& ExpectedNodeSequence,
+    const TArray<int32>& UserNodeSequence) const
+{
+    const int32 ExpectedCount = ExpectedNodeSequence.Num();
+    const int32 UserCount = UserNodeSequence.Num();
+    if (ExpectedCount == 0 || UserCount == 0)
+    {
+        return 0.f;
+    }
+
+    const float SafeTolerance = FMath::Max(0.1f, SimilarityToleranceCells);
+    const float InsertCost = FMath::Max(0.f, ExtraUserNodeCost);
+    const float DeleteCost = FMath::Max(0.f, MissingExpectedNodeCost);
+
+    TArray<float> PreviousRow;
+    TArray<float> CurrentRow;
+    PreviousRow.SetNumZeroed(UserCount + 1);
+    CurrentRow.SetNumZeroed(UserCount + 1);
+
+    for (int32 UserIndex = 1; UserIndex <= UserCount; ++UserIndex)
+    {
+        PreviousRow[UserIndex] = PreviousRow[UserIndex - 1] + InsertCost;
+    }
+
+    for (int32 ExpectedIndex = 1; ExpectedIndex <= ExpectedCount; ++ExpectedIndex)
+    {
+        CurrentRow[0] = PreviousRow[0] + DeleteCost;
+
+        for (int32 UserIndex = 1; UserIndex <= UserCount; ++UserIndex)
+        {
+            const float NodeDistance = CalculateNodeDistanceInCells(
+                ExpectedNodeSequence[ExpectedIndex - 1],
+                UserNodeSequence[UserIndex - 1]);
+            const float ReplaceCost = FMath::Clamp(NodeDistance / SafeTolerance, 0.f, 1.f);
+            const float DeletePathCost = PreviousRow[UserIndex] + DeleteCost;
+            const float InsertPathCost = CurrentRow[UserIndex - 1] + InsertCost;
+            const float ReplacePathCost = PreviousRow[UserIndex - 1] + ReplaceCost;
+
+            CurrentRow[UserIndex] = FMath::Min3(DeletePathCost, InsertPathCost, ReplacePathCost);
+        }
+
+        Swap(PreviousRow, CurrentRow);
+    }
+
+    const float MaxReasonableCost = FMath::Max(
+        static_cast<float>(ExpectedCount) * FMath::Max(DeleteCost, 1.f),
+        static_cast<float>(UserCount) * FMath::Max(InsertCost, 1.f));
+    if (MaxReasonableCost <= UE_KINDA_SMALL_NUMBER)
+    {
+        return 0.f;
+    }
+
+    return 1.f - FMath::Clamp(PreviousRow[UserCount] / MaxReasonableCost, 0.f, 1.f);
+}
+
+// --- CalculateNodeDistanceInCells ---
+float APickupActorAAARuneCanvasInstrument::CalculateNodeDistanceInCells(int32 NodeA, int32 NodeB) const
+{
+    int32 RowA = INDEX_NONE;
+    int32 ColumnA = INDEX_NONE;
+    int32 RowB = INDEX_NONE;
+    int32 ColumnB = INDEX_NONE;
+
+    if (!GetHiddenNodeCoordinatesForId(NodeA, RowA, ColumnA)
+        || !GetHiddenNodeCoordinatesForId(NodeB, RowB, ColumnB))
+    {
+        return SimilarityToleranceCells;
+    }
+
+    const float DeltaRow = static_cast<float>(RowA - RowB);
+    const float DeltaColumn = static_cast<float>(ColumnA - ColumnB);
+    return FMath::Sqrt(DeltaRow * DeltaRow + DeltaColumn * DeltaColumn);
+}
+
+void APickupActorAAARuneCanvasInstrument::LogCurrentCardAndUserSequences(
+    const TCHAR* Context,
+    const TArray<int32>& UserNodeSequence) const
+{
+    const TArray<int32>& ExpectedSequence = GetExpectedNodeSequenceForCurrentCard();
+    const float SimilarityPercent = CalculateNodeSequenceSimilarityPercent(ExpectedSequence, UserNodeSequence);
+    UE_LOG(
+        LogTemp,
+        Warning,
+        TEXT("RuneCanvas %s card_resource_%d expected=%s"),
+        Context,
+        CurrentCardResourceIndex,
+        *BuildNodeSequenceLogString(ExpectedSequence));
+    UE_LOG(
+        LogTemp,
+        Warning,
+        TEXT("RuneCanvas %s user=%s"),
+        Context,
+        *BuildNodeSequenceLogString(UserNodeSequence));
+    UE_LOG(
+        LogTemp,
+        Warning,
+        TEXT("RuneCanvas %s similarity=%.1f%%"),
+        Context,
+        SimilarityPercent);
 }
 
 int32 APickupActorAAARuneCanvasInstrument::GetHiddenNodeId(int32 Row, int32 Column) const
@@ -250,6 +716,158 @@ void APickupActorAAARuneCanvasInstrument::RestoreHeldCollisionAfterMouseTrace()
     MeshComponent->SetGenerateOverlapEvents(false);
 }
 
+void APickupActorAAARuneCanvasInstrument::ApplyThrowablePhysicsTuning()
+{
+    ApplyPickupPhysicsTuning();
+
+    if (GlowLightComponent)
+    {
+        GlowLightComponent->SetLightColor(ActivationGlowColor);
+        GlowLightComponent->SetAttenuationRadius(ActivationLightRadius);
+    }
+}
+
+void APickupActorAAARuneCanvasInstrument::RestoreDefaultThrowableCollision()
+{
+    if (!MeshComponent)
+    {
+        return;
+    }
+
+    ApplyReleasedCollisionProfile();
+    MeshComponent->SetNotifyRigidBodyCollision(true);
+    MeshComponent->BodyInstance.bUseCCD = true;
+}
+
+void APickupActorAAARuneCanvasInstrument::StickToImpact(const FHitResult& Hit, UPrimitiveComponent* HitComponent)
+{
+    bAwaitingThrowImpact = false;
+
+    DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+
+    FVector ResolvedImpactNormal = Hit.ImpactNormal;
+    if (ResolvedImpactNormal.IsNearlyZero())
+    {
+        ResolvedImpactNormal = FVector::UpVector;
+    }
+
+    const FRotator StickRotation = (-ResolvedImpactNormal).Rotation();
+
+    FVector LocalBoundsMin = FVector::ZeroVector;
+    FVector LocalBoundsMax = FVector::ZeroVector;
+    FVector MeshCenterOffset = FVector::ZeroVector;
+    if (MeshComponent)
+    {
+        MeshComponent->GetLocalBounds(LocalBoundsMin, LocalBoundsMax);
+        const FVector LocalBoundsCenter = (LocalBoundsMin + LocalBoundsMax) * 0.5f;
+        const FVector MeshScale = MeshComponent->GetComponentScale();
+        MeshCenterOffset = StickRotation.RotateVector(LocalBoundsCenter * MeshScale);
+    }
+
+    const FVector StickLocation = Hit.ImpactPoint - MeshCenterOffset + ResolvedImpactNormal.GetSafeNormal() * AttachSurfacePadding;
+
+    SetActorLocationAndRotation(StickLocation, StickRotation, false, nullptr, ETeleportType::TeleportPhysics);
+
+    if (MeshComponent)
+    {
+        MeshComponent->SetSimulatePhysics(false);
+        MeshComponent->SetEnableGravity(false);
+        MeshComponent->SetPhysicsLinearVelocity(FVector::ZeroVector);
+        MeshComponent->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+        MeshComponent->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+        MeshComponent->SetCollisionResponseToAllChannels(ECR_Ignore);
+        MeshComponent->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+        MeshComponent->SetGenerateOverlapEvents(false);
+    }
+
+    if (IsValid(HitComponent))
+    {
+        AttachToComponent(HitComponent, FAttachmentTransformRules::KeepWorldTransform);
+    }
+}
+
+void APickupActorAAARuneCanvasInstrument::UpdateActivationVisualState()
+{
+    const bool bShouldGlow = bAttachedToSurface;
+    const UWorld* World = GetWorld();
+
+    if (HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject) || !World || !World->IsGameWorld())
+    {
+        if (GlowLightComponent)
+        {
+            GlowLightComponent->SetHiddenInGame(true);
+            GlowLightComponent->SetVisibility(false);
+            GlowLightComponent->SetIntensity(0.f);
+        }
+
+        return;
+    }
+
+    if (GlowLightComponent)
+    {
+        GlowLightComponent->SetHiddenInGame(!bShouldGlow);
+        GlowLightComponent->SetVisibility(bShouldGlow);
+        GlowLightComponent->SetIntensity(bShouldGlow ? ActivationLightIntensity : 0.f);
+        GlowLightComponent->SetLightColor(ActivationGlowColor);
+        GlowLightComponent->SetAttenuationRadius(ActivationLightRadius);
+    }
+
+    if (!MeshComponent)
+    {
+        return;
+    }
+
+    const float GlowScalar = bShouldGlow ? ActivationGlowIntensity : 0.f;
+    const FLinearColor TintColor(
+        ActivationGlowColor.R,
+        ActivationGlowColor.G,
+        ActivationGlowColor.B,
+        1.f);
+
+    const int32 MaterialSlotCount = MeshComponent->GetNumMaterials();
+    for (int32 MaterialIndex = 0; MaterialIndex < MaterialSlotCount; ++MaterialIndex)
+    {
+        UMaterialInstanceDynamic* DynamicMaterial = nullptr;
+        if (MaterialIndex == FMath::Max(0, CardMaterialSlotIndex) && IsValid(CardDynamicMaterial))
+        {
+            DynamicMaterial = CardDynamicMaterial;
+        }
+        else
+        {
+            DynamicMaterial = Cast<UMaterialInstanceDynamic>(MeshComponent->GetMaterial(MaterialIndex));
+            if (!IsValid(DynamicMaterial))
+            {
+                UMaterialInterface* BaseMaterial = MeshComponent->GetMaterial(MaterialIndex);
+                if (!BaseMaterial)
+                {
+                    continue;
+                }
+
+                DynamicMaterial = MeshComponent->CreateDynamicMaterialInstance(MaterialIndex, BaseMaterial);
+            }
+        }
+
+        if (!IsValid(DynamicMaterial))
+        {
+            continue;
+        }
+
+        if (bShouldGlow)
+        {
+            DynamicMaterial->SetVectorParameterValue(TEXT("EmissiveColor"), ActivationGlowColor);
+            DynamicMaterial->SetVectorParameterValue(TEXT("GlowColor"), ActivationGlowColor);
+            DynamicMaterial->SetVectorParameterValue(TEXT("HighlightColor"), ActivationGlowColor);
+            DynamicMaterial->SetVectorParameterValue(TEXT("TintColor"), TintColor);
+            DynamicMaterial->SetVectorParameterValue(TEXT("ColorAndOpacity"), TintColor);
+            DynamicMaterial->SetVectorParameterValue(TEXT("TintColorAndOpacity"), TintColor);
+        }
+
+        DynamicMaterial->SetScalarParameterValue(TEXT("EmissiveIntensity"), GlowScalar);
+        DynamicMaterial->SetScalarParameterValue(TEXT("GlowIntensity"), GlowScalar);
+        DynamicMaterial->SetScalarParameterValue(TEXT("HighlightIntensity"), GlowScalar);
+        DynamicMaterial->SetScalarParameterValue(TEXT("GlowEnabled"), bShouldGlow ? 1.f : 0.f);
+    }
+}
 
 bool APickupActorAAARuneCanvasInstrument::GetPreferredDrawStartScreenPosition(
     APlayerController* PC,
@@ -312,6 +930,17 @@ bool APickupActorAAARuneCanvasInstrument::EnsureDrawResources()
     if (CardDynamicMaterial && DrawRenderTarget && !DrawTextureParameterName.IsNone())
     {
         CardDynamicMaterial->SetTextureParameterValue(DrawTextureParameterName, DrawRenderTarget);
+    }
+
+    if (CardDynamicMaterial && LoadedCardResources.Num() > 0 && !CardResourceTextureParameterName.IsNone())
+    {
+        UTexture2D* CardTexture = LoadedCardResources.IsValidIndex(CurrentCardResourceIndex)
+            ? Cast<UTexture2D>(LoadedCardResources[CurrentCardResourceIndex].Get())
+            : nullptr;
+        if (CardTexture)
+        {
+            CardDynamicMaterial->SetTextureParameterValue(CardResourceTextureParameterName, CardTexture);
+        }
     }
 
     return DrawRenderTarget != nullptr;
@@ -866,9 +1495,12 @@ void APickupActorAAARuneCanvasInstrument::TryAppendRecognizedNode(int32 NodeId)
         return;
     }
 
-    if (RecognizedNodeSequence.Num() == 0 || !bInterpolateSkippedRecognitionNodes)
+    if (RecognizedNodeSequence.Num() == 0 || !bInterpolateSkippedRecognitionNodes || !bCanInterpolateNextRecognizedNode)
     {
-        TryAppendSingleRecognizedNode(NodeId);
+        if (TryAppendSingleRecognizedNode(NodeId) || RecognizedNodeSequence.Last() == NodeId)
+        {
+            bCanInterpolateNextRecognizedNode = true;
+        }
         return;
     }
 
