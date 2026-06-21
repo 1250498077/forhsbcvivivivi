@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "PickupActor.h"
+#include "TimerManager.h"
 #include "PickupActorAAARuneCanvasInstrument.generated.h"
 
 class APlayerController;
@@ -26,6 +27,13 @@ struct FRuneCanvasPattern
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas")
     TArray<int32> NodeSequence;
+};
+
+struct FRuneCanvasLinkEdge
+{
+    FString EdgeKey;
+    FVector Start = FVector::ZeroVector;
+    FVector End = FVector::ZeroVector;
 };
 
 UCLASS()
@@ -139,6 +147,7 @@ public:
 
     bool CanParticipateInCanvasLinks() const;
     float GetConfiguredCanvasLinkDistance() const;
+    FVector GetCanvasLinkAnchorWorldLocation() const;
 
     bool GetPreferredDrawStartScreenPosition(APlayerController *PC, FVector2D &OutScreenPosition) const;
 
@@ -311,6 +320,9 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Visual", meta = (ClampMin = "0.0"))
     float ActivationLightIntensity = 2800.f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Visual")
+    bool bEnableActivationLight = false;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Visual", meta = (ClampMin = "50.0"))
     float ActivationLightRadius = 220.f;
 
@@ -326,8 +338,32 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links")
     TObjectPtr<UMaterialInterface> ChainLinkMaterialOverride = nullptr;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links")
+    TObjectPtr<UMaterialInterface> ChainLinkTouchedMaterialOverride = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links", meta = (ClampMin = "0.0"))
+    float ChainLinkBreakDelay = 2.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links", meta = (ClampMin = "0.0"))
+    float BrokenChainLinkLifetime = 3.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links", meta = (ClampMin = "0.0"))
+    float BrokenChainLinkImpulse = 220.f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links")
+    bool bBrokenChainLinksSimulatePhysics = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links")
+    bool bBrokenChainLinksCollideWithWorld = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links")
+    FVector ChainLinkAnchorLocalOffset = FVector::ZeroVector;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links", meta = (ClampMin = "1.0"))
     float ChainLinkSpacing = 28.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links", meta = (ClampMin = "1", UIMin = "1"))
+    int32 MaxChainLinksPerEdge = 48;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links", meta = (ClampMin = "0.001"))
     FVector ChainLinkScale = FVector(1.f, 1.f, 1.f);
@@ -400,7 +436,25 @@ private:
     TArray<TObjectPtr<UStaticMeshComponent>> ActiveChainLinkComponents;
 
     UPROPERTY(Transient)
+    TArray<TObjectPtr<UStaticMeshComponent>> BrokenChainLinkComponents;
+
+    UPROPERTY(Transient)
     TArray<TObjectPtr<UMaterialInstanceDynamic>> ActiveChainLinkMaterialInstances;
+    
+    UPROPERTY(Transient)
+    TMap<TObjectPtr<UStaticMeshComponent>, TObjectPtr<UMaterialInstanceDynamic>> ChainLinkDefaultMaterialInstances;
+
+    UPROPERTY(Transient)
+    TMap<TObjectPtr<UStaticMeshComponent>, TObjectPtr<UMaterialInstanceDynamic>> ChainLinkTouchedMaterialInstances;
+
+    UPROPERTY(Transient)
+    TMap<TObjectPtr<UStaticMeshComponent>, FString> ChainLinkEdgeKeys;
+
+    TMap<FString, TArray<TObjectPtr<UStaticMeshComponent>>> ActiveChainLinkComponentsByEdge;
+
+    TSet<FString> BreakingChainLinkEdges;
+    TMap<FString, FTimerHandle> ChainLinkBreakTimerHandles;
+    FString ActiveChainLinkBuildSignature;
 
     TArray<FVector2D> DrawnUVPoints;
     TArray<int32> RecognizedNodeSequence;
@@ -426,6 +480,22 @@ private:
         FVector NormalImpulse,
         const FHitResult &Hit);
 
+    UFUNCTION()
+    void HandleChainLinkBeginOverlap(
+        UPrimitiveComponent *OverlappedComponent,
+        AActor *OtherActor,
+        UPrimitiveComponent *OtherComp,
+        int32 OtherBodyIndex,
+        bool bFromSweep,
+        const FHitResult &SweepResult);
+
+    UFUNCTION()
+    void HandleChainLinkEndOverlap(
+        UPrimitiveComponent *OverlappedComponent,
+        AActor *OtherActor,
+        UPrimitiveComponent *OtherComp,
+        int32 OtherBodyIndex);
+
     bool EnsureDrawResources();
     void ApplyThrowablePhysicsTuning();
     void RestoreDefaultThrowableCollision();
@@ -433,8 +503,16 @@ private:
     void StickToImpact(const FHitResult &Hit, UPrimitiveComponent *HitComponent);
     void UpdateActivationVisualState();
     void RefreshCanvasLinks();
-    void RebuildChainLinks(const TArray<TPair<FVector, FVector>> &LinkEdges);
-    void ClearChainLinks();
+    void RebuildChainLinks(const TArray<FRuneCanvasLinkEdge> &LinkEdges);
+    FString BuildChainLinkBuildSignature(const TArray<FRuneCanvasLinkEdge> &LinkEdges) const;
+    void ClearChainLinks(bool bPreserveBreakingEdges = false);
+    void DestroyBrokenChainLinks();
+    void ApplyChainLinkDefaultMaterial(UStaticMeshComponent *ChainLinkComponent);
+    void ApplyChainLinkTouchedMaterial(UStaticMeshComponent *ChainLinkComponent);
+    void MarkChainLinkEdgeTouched(const FString &EdgeKey);
+    void BreakChainLinkEdge(FString EdgeKey);
+    void FinishBrokenChainLinkComponent(UStaticMeshComponent *ChainLinkComponent);
+    void DestroyIfNoActiveCanvasLinks(const FString &BrokenEdgeKey);
     void UpdateChainLinkPulseVisuals(float DeltaTime);
     void LoadCardResources();
     void ApplyCurrentCardResourceTexture();
