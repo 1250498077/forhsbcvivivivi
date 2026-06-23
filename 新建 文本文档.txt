@@ -1,20 +1,11 @@
-LoginId:05f46f954f05178bb4c607b51e2e3bf2
-EpicAccountId:a11fbf1ee58c42e09f121beb249a51f1
+D:\game\kongbu\Source\kongbu\Private\PickupActorAAARuneDisableCard.cpp(89,70): error C2440: “=”: 无法从“UCapsuleComponent *”转换为“UPrimitiveComponent *”
+        AttachComponent = GhostCharacter->GetGhostAttachZoneComponent();
+                                                                     ^
+D:\game\kongbu\Source\kongbu\Private\PickupActorAAARuneDisableCard.cpp(89,70): note: 指向的类型不相关; 转换需要 reinterpret_cast、C 样式强制转换或带圆括号的函数样式强制转换
+[9/13] Compile [x64] Module.kongbu.6.cpp
+[10/13] Compile [x64] Module.kongbu.7.cpp
+Trace written to file C:/Users/mwh/AppData/Local/UnrealBuildTool/Log.uba with size 22.7kb
+Total time in Unreal Build Accelerator local executor: 211.96 seconds
 
-Unhandled Exception: EXCEPTION_ACCESS_VIOLATION reading address 0xffffffffffffffff
-
-UnrealEditor_kongbu!`AMyPlayerController::ThrowHeldActor'::`2'::<lambda_3>::operator()() [D:\game\kongbu\Source\kongbu\Private\MyPlayerController.cpp:1292]
-UnrealEditor_kongbu!`AMyPlayerController::ThrowHeldActor'::`69'::<lambda_9>::operator()() [D:\game\kongbu\Source\kongbu\Private\MyPlayerController.cpp:1361]
-UnrealEditor_Engine
-UnrealEditor_Engine
-UnrealEditor_Engine
-UnrealEditor_UnrealEd
-UnrealEditor_UnrealEd
-UnrealEditor
-UnrealEditor
-UnrealEditor
-UnrealEditor
-UnrealEditor
-UnrealEditor
-kernel32
-ntdll
+Result: Failed (OtherCompilationError)
+Total execution time: 223.69 seconds
