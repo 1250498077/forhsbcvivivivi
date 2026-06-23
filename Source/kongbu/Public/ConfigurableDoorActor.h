@@ -5,8 +5,19 @@
 #include "ConfigurableDoorActor.generated.h"
 
 class UCurveFloat;
+class UArrowComponent;
+class UBoxComponent;
 class USceneComponent;
 class UStaticMeshComponent;
+
+
+UENUM(BlueprintType)
+enum class EDoorEditorPreviewState : uint8
+{
+    Closed,
+    Open
+};
+
 
 UCLASS(Blueprintable)
 class KONGBU_API AConfigurableDoorActor : public AActor
@@ -19,6 +30,9 @@ public:
     virtual void Tick(float DeltaSeconds) override;
     virtual void OnConstruction(const FTransform& Transform) override;
 
+    bool IsActorInInteractionRange(const AActor* InteractingActor) const;
+    bool CanActorInteractFromView(const AActor* InteractingActor, const FVector& ViewLocation, const FVector& ViewDirection) const;
+
 protected:
     virtual void BeginPlay() override;
 
@@ -27,7 +41,6 @@ protected:
     float EvaluateAnimationAlpha(float NormalizedAlpha) const;
     FTransform GetClosedDoorTransform() const;
     FTransform GetOpenedDoorTransform() const;
-
     // --- Components ---
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
@@ -44,19 +57,15 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     TObjectPtr<UStaticMeshComponent> DoorMeshComponent;
 
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    TObjectPtr<UBoxComponent> InteractionRangeComponent;
+
     // --- Door | Transform ---
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Door|Transform")
+    TObjectPtr<UArrowComponent> ClosedStateTransformComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Door|Transform")
-    FVector ClosedRelativeLocation = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Door|Transform")
-    FRotator ClosedRelativeRotation = FRotator::ZeroRotator;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Door|Transform")
-    FVector OpenRelativeLocation = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Door|Transform")
-    FRotator OpenRelativeRotation = FRotator(0.f, 90.f, 0.f);
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Door|Transform")
+    TObjectPtr<UArrowComponent> OpenStateTransformComponent;
 
     // --- Door | Animation ---
 
@@ -67,10 +76,26 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Door|Animation")
     TObjectPtr<UCurveFloat> TransitionCurve = nullptr;
 
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Door|Interaction")
+    FVector InteractionBoxExtent = FVector(120.f, 90.f, 120.f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Door|Interaction")
+    bool bShowInteractionRangeDebug = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Door|Interaction", meta = (ClampMin = "-1.0", ClampMax = "1.0"))
+    float InteractionFacingDotThreshold = 0.35f;
+
     // --- Door | Setup ---
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Door|Setup")
     bool bStartOpened = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Door|Editor")
+    bool bEnableEditorPreview = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Door|Editor", meta = (EditCondition = "bEnableEditorPreview"))
+    EDoorEditorPreviewState EditorPreviewState = EDoorEditorPreviewState::Closed;
 
     // --- Door | State ---
 

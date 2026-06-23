@@ -177,6 +177,27 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Native Animation|Action")
     TObjectPtr<UAnimSequenceBase> SquatHitUpperBodyAnimation = nullptr;
 
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Native Animation|Reaction")
+    TObjectPtr<UAnimMontage> SoulSuckedMontage = nullptr;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Native Animation|Reaction")
+    TObjectPtr<UAnimSequenceBase> SoulSuckedAnimation = nullptr;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Native Animation|Reaction")
+    TObjectPtr<UAnimMontage> KnockdownMontage = nullptr;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Native Animation|Reaction")
+    TObjectPtr<UAnimSequenceBase> KnockdownAnimation = nullptr;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Native Animation|Reaction")
+    FName ReactionFullBodySlotName = TEXT("FullBody");
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Native Animation|Reaction", meta = (ClampMin = "0.0"))
+    float ReactionBlendInTime = 0.08f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Native Animation|Reaction", meta = (ClampMin = "0.0"))
+    float ReactionBlendOutTime = 0.12f;
+
     UPROPERTY(BlueprintReadOnly, Category = "Native Animation|Action")
     bool bOneShotActionLocked = false;
 
@@ -194,6 +215,15 @@ public:
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Native Animation|Locomotion", meta = (ClampMin = "0.0"))
     float MoveSpeedThreshold = 10.f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Native Animation|Locomotion", meta = (ClampMin = "0.0"))
+    float FirstPersonHeldMovementStartDelay = 0.22f; 
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Native Animation|Locomotion", meta = (ClampMin = "0.0"))
+    float FirstPersonHeldIdleBlendTime = 0.04f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Native Animation|Locomotion", meta = (ClampMin = "0.0"))
+    float FirstPersonHeldWalkReentryDelay = 0.10f;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Native Animation|Locomotion", meta = (ClampMin = "0.0"))
     float JumpStartDuration = 0.35f;
@@ -257,6 +287,15 @@ public:
     UPROPERTY(BlueprintReadOnly, Category = "Native Animation|Look")
     FRotator SmoothedLookRotation = FRotator::ZeroRotator;
 
+    UPROPERTY(BlueprintReadOnly, Category = "Native Animation|Look")
+    FRotator Spine2LookRotation = FRotator::ZeroRotator;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Native Animation|Look")
+    FRotator NeckLookRotation = FRotator::ZeroRotator;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Native Animation|Look")
+    FRotator HeadLookRotation = FRotator::ZeroRotator;
+
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Native Animation|Look")
     TArray<FNativeLookBoneRotation> LookBoneRotations;
 
@@ -275,6 +314,18 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Native Animation|Action")
     bool PlayHitAction();
 
+    UFUNCTION(BlueprintCallable, Category = "Native Animation|Reaction")
+    bool PlaySoulSuckedAction();
+
+    UFUNCTION(BlueprintCallable, Category = "Native Animation|Reaction")
+    bool PlayKnockdownAction();
+
+    UFUNCTION(BlueprintPure, Category = "Native Animation|Reaction")
+    float GetSoulSuckedActionDuration() const;
+
+    UFUNCTION(BlueprintPure, Category = "Native Animation|Reaction")
+    float GetKnockdownActionDuration() const;
+
 protected:
     void InitializeDefaultLookBoneRotations();
     bool HasSkeletonBone(FName BoneName) const;
@@ -285,6 +336,7 @@ protected:
     EWomenNativeLocomotionState ResolveLocomotionState() const;
     void HandleLocomotionStateChanged();
     const FNativeLocomotionAnimationSet* GetAnimationSetForLocomotionState(EWomenNativeLocomotionState LocomotionState) const;
+    bool HasPlayableLocomotionAnimation(EWomenNativeLocomotionState LocomotionState) const;
     
     bool PlayLocomotionAnimation(EWomenNativeLocomotionState LocomotionState);
     bool CanInterruptCurrentLocomotion(EWomenNativeLocomotionState RequestedState) const;
@@ -292,6 +344,7 @@ protected:
     void UpdateHoldTypeFromOwner();
     void HandleHoldTypeChanged();
     void HandleThrowMontageState();
+    bool IsFirstPersonAnimationInstance() const;
     const FPickupHeldAnimationSet* GetCurrentHeldAnimationSet() const;
     UAnimSequenceBase* GetHeldLocomotionAnimation(EWomenNativeLocomotionState LocomotionState) const;
     UAnimSequenceBase* GetHeldThrowUpperBodyAnimation(bool bSquatThrow, bool bRunThrow) const;
@@ -302,6 +355,7 @@ protected:
     bool IsCrouchAction() const;
     bool CanPlayOneShotAction() const;
     bool PlayOneShotAction(UAnimSequenceBase* UpperBodyAnimation, UAnimMontage* Montage);
+    bool PlayInterruptibleFullBodyAction(UAnimSequenceBase* FullBodyAnimation, UAnimMontage* Montage, float& OutDuration);
     void StartOneShotActionLock(float LockDuration);
 
 private:
@@ -311,7 +365,11 @@ private:
     bool bWasSquat = false;
     bool bPendingCrouchEnter = false;
     bool bPendingCrouchExit = false;
+    bool bHasMovementInput = false;
+    bool bWasMovementInput = false;
     float JumpStartTimeRemaining = 0.f;
+    float FirstPersonHeldMovingTime = 0.f;
+    float FirstPersonHeldWalkReentryTimeRemaining = 0.f;
 
     UPROPERTY(Transient)
     TObjectPtr<UAnimMontage> ActiveThrowDynamicMontage = nullptr;
@@ -321,4 +379,5 @@ private:
 
     bool bThrowUsesLoopingUpperBodySequence = false;
     bool bThrowUsesFullBodySlot = false;
+    bool bNeedsLocomotionReplayAfterForcedAction = false;
 };

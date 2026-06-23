@@ -10,9 +10,10 @@
 class FLifetimeProperty;
 class UInputMappingContext;
 class UInputAction;
+class AConfigurableDoorActor;
 class APickupActor;
 class APickupActorAAARuneInstrument;
-class PickupActorAAARuneGridInstrument;
+class APickupActorAAARuneGridInstrument;
 class AWomenCharacter;
 
 UCLASS()
@@ -139,6 +140,10 @@ protected:
     UPROPERTY(EditAnywhere, Category = "Movement")
     float WalkSpeed = 200.f;
 
+    // 下蹲时的目标移动速度。
+    UPROPERTY(EditAnywhere, Category = "Movement")
+    float CrouchSpeed = 120.f;
+
     // 冲刺目标速度。
     UPROPERTY(EditAnywhere, Category = "Movement")
     float RunSpeed = 400.f;
@@ -170,15 +175,22 @@ protected:
     void ToggleTabUI();
     void HandleRightClickPressed();
     void HandleRightClickReleased();
+    void HandlePrimaryActionReleased();
+    void HandleMouseWheelUp();
+    void HandleMouseWheelDown();
     void TryCloseHeldActorBehavior();
     bool TryTogglePickupActor(APickupActor* PickupActor);
     bool TryPickupActor(APickupActor* PickupActor);
     bool CanInteractWithPickupActor(const APickupActor* PickupActor) const;
     bool AttachHeldActorToFirstPersonView(APickupActor* PickupActor);
     bool AttachHeldActorToThirdPersonView(APickupActor* PickupActor);
+    bool CanSprintWithHeldActor() const;
+    bool CanThrowHeldActor() const;
+    bool IsThrowStateActive(const AWomenCharacter* MyChar) const;
+    void ApplySprintAnimationState(AWomenCharacter* MyChar);
     void StartThrowAnimationState(AWomenCharacter* MyChar) const;
     void FinishThrowAnimationState(AWomenCharacter* MyChar) const;
-    void ClearThrowMiddleWindow(AWomenCharacter* MyChar) const;
+    void ClearThrowMiddleWindow(AWomenCharacter* MyChar);
 
     UFUNCTION()
     void OnRep_HeldActor();
@@ -206,6 +218,9 @@ protected:
 
     // 是否正在按住冲刺键。真正速度变化在 Tick 里平滑插值完成。
     bool bWantsToSprint = false;
+    bool bHasDeferredSprintInput = false;
+    bool bDeferredWantsToSprint = false;
+    bool bIsRunAbtInputActive = false;
 
     void SprintStart();
     void SprintStop();
@@ -225,9 +240,14 @@ protected:
     void TryPutDown();
     void ThrowHeldActor();
     void UpdateHeldRuneInstrumentDraw();
+    bool TryToggleNearbyDoor();
+    AConfigurableDoorActor* FindBestInteractableDoor() const;
     bool GetPlaceLocation(FVector& OutLocation, FRotator& OutRotation);
     bool TracePickupActorFromView(APickupActor*& OutPickupActor, FHitResult& OutHit, bool bDrawDebug) const;
     bool TryClosePickupActor(APickupActor* PickupActor);
+
+    UFUNCTION(Server, Reliable)
+    void ServerToggleDoor(AConfigurableDoorActor* DoorActor);
 
     // Tick 负责平滑速度变化、手持物 bob 动画和遮挡隐藏。
     virtual void Tick(float DeltaTime) override;

@@ -2,7 +2,8 @@
 
 #include "CoreMinimal.h"
 #include "PickupActor.h"
-#include "PickupActorAAARuneCanvasInstrument.generated.h"
+#include "TimerManager.h"
+#include "PickupActorAAARuneCanvascommonInstrument.generated.h"
 
 class APlayerController;
 class UMaterialInstanceDynamic;
@@ -28,13 +29,21 @@ struct FRuneCanvasPattern
     TArray<int32> NodeSequence;
 };
 
+UENUM(BlueprintType)
+enum class EFlatCardFlightSpinAxis : uint8
+{
+    Pitch UMETA(DisplayName = "Pitch"),
+    Yaw   UMETA(DisplayName = "Yaw"),
+    Roll  UMETA(DisplayName = "Roll")
+};
+
 UCLASS()
-class KONGBU_API APickupActorAAARuneCanvasInstrument : public APickupActor
+class KONGBU_API APickupActorAAARuneCanvascommonInstrument : public APickupActor
 {
     GENERATED_BODY()
 
 public:
-    APickupActorAAARuneCanvasInstrument();
+    APickupActorAAARuneCanvascommonInstrument();
 
     virtual void BeginPlay() override;
     virtual void OnConstruction(const FTransform &Transform) override;
@@ -137,9 +146,6 @@ public:
         return !bAttachedToSurface;
     }
 
-    bool CanParticipateInCanvasLinks() const;
-    float GetConfiguredCanvasLinkDistance() const;
-
     bool GetPreferredDrawStartScreenPosition(APlayerController *PC, FVector2D &OutScreenPosition) const;
 
 protected:
@@ -148,9 +154,6 @@ protected:
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     TObjectPtr<UPointLightComponent> GlowLightComponent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    TObjectPtr<USceneComponent> CanvasLinkRootComponent;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Surface")
     FVector2D DrawSurfaceSize = FVector2D(60.f, 20.f);
@@ -237,7 +240,7 @@ protected:
     float DrawSurfacePreviewBorderThickness = 0.25f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Recognition|Debug", meta = (ClampMin = "0.001"))
-    FVector RecognitionGridPreviewNodeScale = FVector(0.012f, 0.012f, 0.012f);
+    FVector RecognitionGridPreviewNodeScale = FVector(0.007f, 0.007f, 0.012f);
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Recognition|Debug")
     TObjectPtr<UStaticMesh> RecognitionGridPreviewNodeMesh = nullptr;
@@ -255,10 +258,10 @@ protected:
     float RecognitionGridGuideThicknessPixels = 2.f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Recognition", meta = (ClampMin = "1", UIMin = "1"))
-    int32 HiddenNodeRows = 5;
+    int32 HiddenNodeRows = 20;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Recognition", meta = (ClampMin = "1", UIMin = "1"))
-    int32 HiddenNodeColumns = 5;
+    int32 HiddenNodeColumns = 40;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Recognition", meta = (ClampMin = "0.0", ClampMax = "0.45"))
     float HiddenNodeEdgePaddingUV = 0.08f;
@@ -302,6 +305,66 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Attach", meta = (ClampMin = "1.0"))
     float AttachTraceForwardPadding = 35.f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Flight")
+    bool bUseFlatCardFlight = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Flight", meta = (ClampMin = "0.0"))
+    float FlatCardFlightDuration = 2.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Flight", meta = (ClampMin = "0.0"))
+    float FlatCardFlightSpeedMultiplier = 0.65f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Flight", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float FlatCardFlightVerticalAimInfluence = 1.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Flight", meta = (ClampMin = "0.0"))
+    float FlatCardFlightSpinRateDegrees = 2500.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Flight")
+    EFlatCardFlightSpinAxis FlatCardFlightSpinAxis = EFlatCardFlightSpinAxis::Yaw;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Flight")
+    FRotator FlatCardFlightRotationOffset = FRotator(0.f, 90.f, 0.f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Flight|Curve")
+    bool bEnableFlatCardFlightCurve = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Flight|Curve", meta = (ClampMin = "-90.0", ClampMax = "90.0"))
+    float FlatCardFlightSideCurveDegreesPerSecond = 8.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Flight|Curve", meta = (ClampMin = "-45.0", ClampMax = "45.0"))
+    float FlatCardFlightLiftCurveDegreesPerSecond = 2.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Flight|Helix")
+    bool bEnableFlatCardFlightHelix = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Flight|Helix", meta = (ClampMin = "0.0"))
+    float FlatCardFlightHelixStartDistance = 100.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Flight|Helix", meta = (ClampMin = "1.0"))
+    float FlatCardFlightHelixBlendDistance = 800.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Flight|Helix", meta = (ClampMin = "0.0"))
+    float FlatCardFlightHelixRadius = 60.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Flight|Helix")
+    float FlatCardFlightHelixAngularSpeedDegreesPerSecond = 200.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Flight|Helix|Face")
+    bool bEnableFlatCardFlightHelixFaceWobble = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Flight|Helix|Face", meta = (ClampMin = "-90.0", ClampMax = "90.0"))
+    float FlatCardFlightHelixFaceWobbleAngleDegrees = 90.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Flight|Helix|Face")
+    EFlatCardFlightSpinAxis FlatCardFlightHelixFaceWobbleAxis = EFlatCardFlightSpinAxis::Roll;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Flight|Helix|Face", meta = (ClampMin = "0.0"))
+    float FlatCardFlightHelixFaceWobbleCyclesPerHelixTurn = 1.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Flight|Helix|Face")
+    float FlatCardFlightHelixFaceWobblePhaseOffsetDegrees = 90.f;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Visual")
     FLinearColor ActivationGlowColor = FLinearColor(0.12f, 0.85f, 1.f, 1.f);
 
@@ -311,65 +374,11 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Visual", meta = (ClampMin = "0.0"))
     float ActivationLightIntensity = 2800.f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Visual")
+    bool bEnableActivationLight = false;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Visual", meta = (ClampMin = "50.0"))
     float ActivationLightRadius = 220.f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links", meta = (ClampMin = "50.0"))
-    float LinkDistance = 550.f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links")
-    bool bRenderLinkChains = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links")
-    TObjectPtr<UStaticMesh> ChainLinkMesh = nullptr;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links")
-    TObjectPtr<UMaterialInterface> ChainLinkMaterialOverride = nullptr;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links", meta = (ClampMin = "1.0"))
-    float ChainLinkSpacing = 28.f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links", meta = (ClampMin = "0.001"))
-    FVector ChainLinkScale = FVector(1.f, 1.f, 1.f);
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links")
-    FRotator ChainLinkRotationOffset = FRotator::ZeroRotator;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links")
-    bool bAlternateChainLinkRoll = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links")
-    float AlternateChainLinkRollDegrees = 90.f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links", meta = (ClampMin = "0.02"))
-    float LinkRefreshInterval = 0.25f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links")
-    bool bAnimateLinkPulse = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links", meta = (ClampMin = "0.0"))
-    float LinkPulseSpeed = 1.6f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links", meta = (ClampMin = "0.0"))
-    float LinkPulseMin = 0.35f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links", meta = (ClampMin = "0.0"))
-    float LinkPulseMax = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links", meta = (ClampMin = "0.0"))
-    float LinkGlowIntensity = 6.f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links")
-    FLinearColor LinkGlowColor = FLinearColor(0.65f, 0.95f, 1.0f, 1.0f);
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links")
-    FName LinkPulseScalarParameterName = TEXT("Pulse");
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links")
-    FName LinkGlowScalarParameterName = TEXT("GlowIntensity");
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Links")
-    FName LinkColorParameterName = TEXT("GlowColor");
 
     UFUNCTION(BlueprintImplementableEvent, Category = "RuneCanvas|Visual")
     void ReceiveRuneCanvasDrawStateChanged(const TArray<FVector2D> &ActiveUVPoints, bool bDrawingActive);
@@ -379,6 +388,10 @@ protected:
 
     UFUNCTION(BlueprintImplementableEvent, Category = "RuneCanvas|Gameplay")
     void ReceiveRuneCanvasPatternSolved(FName PatternId, AActor *SolvingActor);
+
+    virtual void OnRuneCanvasAttachedToSurface();
+    virtual void OnRuneCanvasDetachedFromSurface();
+    void DisableAndHideRuneCanvasForLifetime(float LifeSpanSeconds);
 
 private:
     UPROPERTY(Transient)
@@ -396,12 +409,6 @@ private:
     UPROPERTY(Transient)
     TArray<TObjectPtr<UStaticMeshComponent>> RecognitionGridPreviewComponents;
 
-    UPROPERTY(Transient)
-    TArray<TObjectPtr<UStaticMeshComponent>> ActiveChainLinkComponents;
-
-    UPROPERTY(Transient)
-    TArray<TObjectPtr<UMaterialInstanceDynamic>> ActiveChainLinkMaterialInstances;
-
     TArray<FVector2D> DrawnUVPoints;
     TArray<int32> RecognizedNodeSequence;
 
@@ -415,8 +422,18 @@ private:
     bool bAttachedToSurface = false;
     FName SolvedPatternId = NAME_None;
     FVector LastAttachTraceLocation = FVector::ZeroVector;
-    float LinkRefreshAccumulator = 0.f;
-    float LinkPulseTimeAccumulator = 0.f;
+    bool bFlatCardFlightActive = false;
+    FVector FlatCardFlightDirection = FVector::ForwardVector;
+    FVector FlatCardFlightAxisDirection = FVector::ForwardVector;
+    FVector FlatCardFlightAxisRight = FVector::RightVector;
+    FVector FlatCardFlightAxisUp = FVector::UpVector;
+    FVector FlatCardFlightStartVisualCenter = FVector::ZeroVector;
+    float FlatCardFlightElapsedTime = 0.f;
+    float FlatCardFlightSpinAngle = 0.f;
+    float FlatCardFlightSpeed = 0.f;
+    float FlatCardFlightAxisDistance = 0.f;
+    float FlatCardFlightHelixAngle = 0.f;
+    float FlatCardFlightHelixAlpha = 0.f;
 
     UFUNCTION()
     void HandleRuneCanvasHit(
@@ -429,13 +446,17 @@ private:
     bool EnsureDrawResources();
     void ApplyThrowablePhysicsTuning();
     void RestoreDefaultThrowableCollision();
+    void StartFlatCardFlight(const FVector &ThrowDirection, float ThrowForce);
+    void UpdateFlatCardFlight(float DeltaTime);
+    void UpdateFlatCardFlightCurve(float DeltaTime);
+    void UpdateFlatCardFlightHelix(float DeltaTime);
+    void StopFlatCardFlight(bool bRestoreGravity);
+    FRotator BuildFlatCardFlightRotation() const;
+    FVector GetFlatCardVisualCenterWorldLocation() const;
+    void ApplyFlatCardFlightRotationPreservingVisualCenter(const FRotator &NewRotation);
     void UpdateThrownAttachTrace();
     void StickToImpact(const FHitResult &Hit, UPrimitiveComponent *HitComponent);
     void UpdateActivationVisualState();
-    void RefreshCanvasLinks();
-    void RebuildChainLinks(const TArray<TPair<FVector, FVector>> &LinkEdges);
-    void ClearChainLinks();
-    void UpdateChainLinkPulseVisuals(float DeltaTime);
     void LoadCardResources();
     void ApplyCurrentCardResourceTexture();
     const TArray<int32> &GetExpectedNodeSequenceForCurrentCard() const;

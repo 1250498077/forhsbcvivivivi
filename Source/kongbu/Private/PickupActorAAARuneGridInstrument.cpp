@@ -197,7 +197,7 @@ void APickupActorAAARuneGridInstrument::ApplyVisualPreset()
         CellScreenBoundsPadding = 14.f;
         bAllowCellRepeat = false;
         bRequireExactPatternMatch = true;
-        bEnableLineRendering = false;
+        bEnableLineRendering = true;
         LineThickness = 0.05f;
 
         IdleCellTint = FLinearColor(0.07f, 0.12f, 0.18f, 1.0f);
@@ -223,7 +223,7 @@ void APickupActorAAARuneGridInstrument::ApplyVisualPreset()
         CellScreenBoundsPadding = 16.f;
         bAllowCellRepeat = false;
         bRequireExactPatternMatch = true;
-        bEnableLineRendering = false;
+        bEnableLineRendering = true;
         LineThickness = 0.07f;
 
         IdleCellTint = FLinearColor(0.20f, 0.12f, 0.06f, 1.0f);
@@ -310,8 +310,13 @@ void APickupActorAAARuneGridInstrument::UpdateRuneDrawFromScreenPosition(
 
     const int32 NewHoveredCellId = ResolveHoveredCellFromScreenPosition(UsingController, ScreenPosition);
     SetHoveredCellId(NewHoveredCellId);
-    TryAppendResolvedCell(NewHoveredCellId);
-    ApplySequenceToVisuals(CurrentDrawSequence, false, true);
+    const int32 PreviousSequenceNum = CurrentDrawSequence.Num();
+    if (TryAppendResolvedCell(NewHoveredCellId))
+    {
+        AppendLineMeshes(CurrentDrawSequence, PreviousSequenceNum);
+        ReceiveRuneGridVisualStateChanged(CurrentDrawSequence, false, true);
+    }
+    
 }
 
 TArray<int32> APickupActorAAARuneGridInstrument::EndRuneDraw(APlayerController* UsingController)
@@ -658,153 +663,51 @@ int32 APickupActorAAARuneGridInstrument::ResolveHoveredCellFromScreenPosition(
 	APlayerController* UsingController,
 	const FVector2D& ScreenPosition) const
 {
-	if (!UsingController)
+	if (!UsingController || !GridRootComponent)
 	{
 		return INDEX_NONE;
 	}
 
-	const float MaxDistanceSquared = FMath::Square(FMath::Max(1.f, CellSelectionScreenRadius));
-    const bool bRequireStrictCenterSelection = CurrentDrawSequence.Num() == 0;
-    float BestPrimaryDistanceSquared = MaxDistanceSquared;
-    float BestCenterDistanceSquared = TNumericLimits<float>::Max();
-    int32 BestCellId = INDEX_NONE;
-
-    auto IsBetterCandidate = [&BestPrimaryDistanceSquared, &BestCenterDistanceSquared, &BestCellId](
-    float CandidatePrimaryDistanceSquared,
-    float CandidateCenterDistanceSquared,
-    int32 CandidateCellId)
+	FVector RayOrigin = FVector::ZeroVector;
+    FVector RayDirection = FVector::ZeroVector;
+    if (!UsingController->DeprojectScreenPositionToWorld(ScreenPosition.X, ScreenPosition.Y, RayOrigin, RayDirection))
     {
-        if (CandidatePrimaryDistanceSquared < BestPrimaryDistanceSquared)
-        {
-            return true;
-        }
+        return INDEX_NONE;
+    }
 
-        if (FMath::IsNearlyEqual(CandidatePrimaryDistanceSquared, BestPrimaryDistanceSquared))
-        {
-            if (CandidateCenterDistanceSquared < BestCenterDistanceSquared)
-            {
-                return true;
-            }
+    const FTransform GridTransform = GridRootComponent->GetComponentTransform();
+    const FVector PlaneOrigin = GridTransform.GetLocation();
+    const FVector PlaneNormal = GridTransform.GetUnitAxis(EAxis::Z);
+    const float Denominator = FVector::DotProduct(RayDirection, PlaneNormal);
+    if (FMath::IsNearlyZero(Denominator))
+    {
+        return INDEX_NONE;
+    }
 
-            if (FMath::IsNearlyEqual(CandidateCenterDistanceSquared, BestCenterDistanceSquared))
-            {
-                return BestCellId == INDEX_NONE || CandidateCellId < BestCellId;
-            }
-        }
+    const float DistanceAlongRay = FVector::DotProduct(PlaneOrigin - RayOrigin, PlaneNormal) / Denominator;
+    if (DistanceAlongRay < 0.f)
+    {
+        return INDEX_NONE;
+    }
 
-        return false;
-    };
+    const FVector LocalHitLocation = GridTransform.InverseTransformPosition(RayOrigin + RayDirection * DistanceAlongRay);
+    const int32 SafeRows = FMath::Max(1, GridRows);
+    const int32 SafeColumns = FMath::Max(1, GridColumns);
+    const float SafeRowSpacing = FMath::Max(UE_KINDA_SMALL_NUMBER, CellSpacing.Y);
+    const float SafeColumnSpacing = FMath::Max(UE_KINDA_SMALL_NUMBER, CellSpacing.X);
+    const float TotalWidth = (SafeColumns - 1) * SafeColumnSpacing;
+    const float TotalHeight = (SafeRows - 1) * SafeRowSpacing;
+    const float XOffset = bCenterGridAroundOrigin ? -TotalHeight * 0.5f : 0.f;
+    const float YOffset = bCenterGridAroundOrigin ? -TotalWidth * 0.5f : 0.f;
 
+    const int32 RowIndex = FMath::RoundToInt((LocalHitLocation.X - XOffset) / SafeRowSpacing);
+    const int32 ColumnIndex = FMath::RoundToInt((LocalHitLocation.Y - YOffset) / SafeColumnSpacing);
+    if (RowIndex < 0 || RowIndex >= SafeRows || ColumnIndex < 0 || ColumnIndex >= SafeColumns)
+    {
+        return INDEX_NONE;
+    }
 
-	for (const TPair<int32, TWeakObjectPtr<UStaticMeshComponent>>& CellPair : CellComponentById)
-	{
-		const UStaticMeshComponent* CellComponent = CellPair.Value.Get();
-		if (!IsValid(CellComponent))
-		{
-			continue;
-		}
-
-		FVector2D ProjectedScreenLocation = FVector2D::ZeroVector;
-		if (!UsingController->ProjectWorldLocationToScreen(CellComponent->GetComponentLocation(), ProjectedScreenLocation, true))
-		{
-			continue;
-		}
-
-        const float CenterDistanceSquared = FVector2D::DistSquared(ProjectedScreenLocation, ScreenPosition);
-        if (bRequireStrictCenterSelection)
-        {
-            if (CenterDistanceSquared > MaxDistanceSquared)
-            {
-                continue;
-            }
-
-            if (IsBetterCandidate(CenterDistanceSquared, CenterDistanceSquared, CellPair.Key))
-            {
-                BestPrimaryDistanceSquared = CenterDistanceSquared;
-                BestCenterDistanceSquared = CenterDistanceSquared;
-                BestCellId = CellPair.Key;
-            }
-
-            continue;
-        }
-
-
-        if (bUseProjectedCellBoundsSelection)
-        {
-            const FBoxSphereBounds CellBounds = CellComponent->Bounds;
-            const FVector BoundsOrigin = CellBounds.Origin;
-            const FVector BoundsExtent = CellBounds.BoxExtent;
-
-            const FVector CornerOffsets[8] = {
-                FVector(-BoundsExtent.X, -BoundsExtent.Y, -BoundsExtent.Z),
-                FVector(-BoundsExtent.X, -BoundsExtent.Y,  BoundsExtent.Z),
-                FVector(-BoundsExtent.X,  BoundsExtent.Y, -BoundsExtent.Z),
-                FVector(-BoundsExtent.X,  BoundsExtent.Y,  BoundsExtent.Z),
-                FVector( BoundsExtent.X, -BoundsExtent.Y, -BoundsExtent.Z),
-                FVector( BoundsExtent.X, -BoundsExtent.Y,  BoundsExtent.Z),
-                FVector( BoundsExtent.X,  BoundsExtent.Y, -BoundsExtent.Z),
-                FVector( BoundsExtent.X,  BoundsExtent.Y,  BoundsExtent.Z)
-            };
-
-            bool bProjectedAnyCorner = false;
-            float MinScreenX = TNumericLimits<float>::Max();
-            float MinScreenY = TNumericLimits<float>::Max();
-            float MaxScreenX = -TNumericLimits<float>::Max();
-            float MaxScreenY = -TNumericLimits<float>::Max();
-
-            for (const FVector& CornerOffset : CornerOffsets)
-            {
-                FVector2D ProjectedCorner = FVector2D::ZeroVector;
-                if (!UsingController->ProjectWorldLocationToScreen(BoundsOrigin + CornerOffset, ProjectedCorner, true))
-                {
-                    continue;
-                }
-
-                bProjectedAnyCorner = true;
-                MinScreenX = FMath::Min(MinScreenX, ProjectedCorner.X);
-                MinScreenY = FMath::Min(MinScreenY, ProjectedCorner.Y);
-                MaxScreenX = FMath::Max(MaxScreenX, ProjectedCorner.X);
-                MaxScreenY = FMath::Max(MaxScreenY, ProjectedCorner.Y);
-            }
-
-            if (bProjectedAnyCorner)
-            {
-                MinScreenX -= CellScreenBoundsPadding;
-                MinScreenY -= CellScreenBoundsPadding;
-                MaxScreenX += CellScreenBoundsPadding;
-                MaxScreenY += CellScreenBoundsPadding;
-
-                const float ClampedX = FMath::Clamp(ScreenPosition.X, MinScreenX, MaxScreenX);
-                const float ClampedY = FMath::Clamp(ScreenPosition.Y, MinScreenY, MaxScreenY);
-                const float BoundsDistanceSquared = FVector2D::DistSquared(ScreenPosition, FVector2D(ClampedX, ClampedY));
-
-                if (BoundsDistanceSquared <= MaxDistanceSquared && IsBetterCandidate(BoundsDistanceSquared, CenterDistanceSquared, CellPair.Key))
-                {
-                    BestPrimaryDistanceSquared = BoundsDistanceSquared;
-                    BestCenterDistanceSquared = CenterDistanceSquared;
-                    BestCellId = CellPair.Key;
-                }
-            }
-        }
-
-
-		if (CenterDistanceSquared > MaxDistanceSquared)
-		{
-			continue;
-		}
-
-
-        if (IsBetterCandidate(CenterDistanceSquared, CenterDistanceSquared, CellPair.Key))
-        {
-            BestPrimaryDistanceSquared = CenterDistanceSquared;
-            BestCenterDistanceSquared = CenterDistanceSquared;
-            BestCellId = CellPair.Key;
-        }
-
-
-	}
-
-	return BestCellId;
+    return GetGridCellId(RowIndex, ColumnIndex);
 }
 
 bool APickupActorAAARuneGridInstrument::TryAppendResolvedCell(int32 CellId)
@@ -903,7 +806,6 @@ void APickupActorAAARuneGridInstrument::ApplySequenceToVisuals(
 	bool bSolved,
 	bool bDrawingActive)
 {
-	ApplyCellVisuals(CellSequence, bSolved, bDrawingActive);
 	RebuildLineMeshes(CellSequence);
 	ReceiveRuneGridVisualStateChanged(CellSequence, bSolved, bDrawingActive);
 }
@@ -1063,14 +965,19 @@ void APickupActorAAARuneGridInstrument::RebuildLineMeshes(const TArray<int32>& C
 {
     ClearLineMeshes();
 
-    if (!bEnableLineRendering || !GridLineRootComponent || !LineSegmentMesh || CellSequence.Num() < 2)
+    AppendLineMeshes(CellSequence, 1);
+}
+
+void APickupActorAAARuneGridInstrument::AppendLineMeshes(const TArray<int32>& CellSequence, int32 FirstSegmentEndIndex)
+{
+    if (!GridLineRootComponent || !LineSegmentMesh || CellSequence.Num() < 2)
     {
         return;
     }
 
     const FTransform RootTransform = GridLineRootComponent->GetComponentTransform();
 
-    for (int32 CellIndex = 1; CellIndex < CellSequence.Num(); ++CellIndex)
+    for (int32 CellIndex = FMath::Max(1, FirstSegmentEndIndex); CellIndex < CellSequence.Num(); ++CellIndex)
     {
         const FVector StartWorld = GetCellWorldLocationById(CellSequence[CellIndex - 1]);
         const FVector EndWorld = GetCellWorldLocationById(CellSequence[CellIndex]);

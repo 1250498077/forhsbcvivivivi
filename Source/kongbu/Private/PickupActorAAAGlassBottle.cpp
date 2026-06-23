@@ -3,6 +3,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMeshActor.h"
 #include "GameFramework/Pawn.h"
+#include "GhostThrowablePropComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "MyAIController.h"
@@ -33,7 +34,7 @@ APickupActorAAAGlassBottle::APickupActorAAAGlassBottle()
     ItemLinearDamping = 0.04f;
     ItemAngularDamping = 0.15f;
     ItemThrowSpinRateDegrees = 2200.f;
-
+    CreateDefaultSubobject<UGhostThrowablePropComponent>(TEXT("GhostThrowablePropComponent"));
     Tags.Add(FName("Bottle"));
     Tags.Add(FName("Pickup"));
     Tags.Add(FName("Breakable"));

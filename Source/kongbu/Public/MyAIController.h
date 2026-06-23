@@ -153,14 +153,39 @@ public:
     UFUNCTION(BlueprintCallable, Category = "AI|Fear|Rage")
     void ApplyFearAngerStimulus(const FFearStimulus& Stimulus);
 
-    // 为当前鬼从 ExorcismSubsystem 领取随机外形，并替换网格体。
-    // 在 OnPossess 中自动调用；也可在蓝图里手动调用以刷新外形。
+    // 为当前鬼确定驱魔类型。优先使用 GhostCharacter 蓝图里配置的类型编号，未配置时再从 ExorcismSubsystem 领取。
     UFUNCTION(BlueprintCallable, Category = "AI|Exorcism")
     void AssignExorcismGhostType();
 
     // 当前鬼被分配的驱魔类型编号。INDEX_NONE 表示尚未分配。
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI|Exorcism")
     int32 ExorcismGhostTypeId = INDEX_NONE;
+
+    UFUNCTION(BlueprintPure, Category = "AI|State")
+    EEnemyAIState GetCurrentAIState() const
+    {
+        return CurrentState;
+    }
+
+    UFUNCTION(BlueprintPure, Category = "AI|State")
+    bool IsCurrentAIState(EEnemyAIState State) const
+    {
+        return CurrentState == State;
+    }
+
+    UFUNCTION(BlueprintPure, Category = "AI|State")
+    bool CanCurrentlySeePlayer() const
+    {
+        return bCanSeePlayer && IsValid(TargetPlayer);
+    }
+
+    UFUNCTION(BlueprintPure, Category = "AI|State")
+    AActor* GetCurrentTargetPlayer() const
+    {
+        return TargetPlayer;
+    }
+
+    bool TryGetTrackedPlayerLocation(FVector& OutLocation) const;
 
     // 让鬼短暂进入眩晕：原地缓慢转圈、立刻丢失当前仇恨，并在结束后回到巡逻。
     UFUNCTION(BlueprintCallable, Category = "AI|Effects|Stun")

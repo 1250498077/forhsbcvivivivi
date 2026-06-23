@@ -1,17 +1,20 @@
 
 #include "MyPlayerController.h"
-#include "WomenCharacter.h" // �� ����һ��
+#include "WomenCharacter.h" 
 #include "GameFramework/CharacterMovementComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "GameFramework/Character.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "Camera/CameraComponent.h"
+#include "ConfigurableDoorActor.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "InputCoreTypes.h"
 #include "Net/UnrealNetwork.h"
 #include "PickupActor.h"
+#include "PickupActorAAARuneCanvascommonInstrument.h"
 #include "PickupActorAAARuneGridInstrument.h"
 #include "PickupActorAAARuneInstrument.h"
 #include "PickupActorAAASlowTalisman.h"
@@ -117,6 +120,7 @@ void AMyPlayerController::SetupInputComponent()
         if (ThrowAction)
         {
             EI->BindAction(ThrowAction, ETriggerEvent::Started, this, &AMyPlayerController::ThrowHeldActor);
+            EI->BindAction(ThrowAction, ETriggerEvent::Completed, this, &AMyPlayerController::HandlePrimaryActionReleased);
         }
 
         if (CloseItemAction)
@@ -151,6 +155,11 @@ void AMyPlayerController::SetupInputComponent()
         if (ToggleTabAction)
         {
             EI->BindAction(ToggleTabAction, ETriggerEvent::Started, this, &AMyPlayerController::ToggleTabUI);
+        }
+        if (InputComponent)
+        {
+            InputComponent->BindKey(EKeys::MouseScrollUp, IE_Pressed, this, &AMyPlayerController::HandleMouseWheelUp);
+            InputComponent->BindKey(EKeys::MouseScrollDown, IE_Pressed, this, &AMyPlayerController::HandleMouseWheelDown);
         }
     }
 }
@@ -230,6 +239,50 @@ void AMyPlayerController::HandleRightClickPressed()
         return;
     }
 
+    if (APickupActorAAARuneCanvascommonInstrument *RuneCanvasInstrument = Cast<APickupActorAAARuneCanvascommonInstrument>(HeldActor))
+    {
+
+        if (RuneCanvasInstrument->IsRuneDrawActive())
+        {
+            bShowMouseCursor = false;
+            SetInputMode(FInputModeGameOnly());
+
+            const TArray<int32> FinalSequence = RuneCanvasInstrument->EndRuneDraw(this);
+            if (!HasAuthority())
+            {
+                ServerSubmitRuneSequence(RuneCanvasInstrument, FinalSequence);
+                return;
+            }
+
+            AActor* SolvingActor = GetPawn();
+            if (!IsValid(SolvingActor))
+            {
+                SolvingActor = this;
+            }
+
+            RuneCanvasInstrument->CommitRuneSequenceAuthority(FinalSequence, SolvingActor);
+            return;
+        }
+
+        if (RuneCanvasInstrument->BeginRuneDraw(this))
+        {
+            bShowMouseCursor = true;
+            FInputModeGameAndUI InputMode;
+            InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::LockAlways);
+            InputMode.SetHideCursorDuringCapture(false);
+            SetInputMode(InputMode);
+
+            FVector2D StartScreenPosition = FVector2D::ZeroVector;
+            if (RuneCanvasInstrument->GetPreferredDrawStartScreenPosition(this, StartScreenPosition))
+            {
+                SetMouseLocation(
+                    FMath::RoundToInt(StartScreenPosition.X),
+                    FMath::RoundToInt(StartScreenPosition.Y));
+            }
+        }
+        return;
+    }
+
     TryCloseHeldActorBehavior();
 }
 
@@ -287,6 +340,12 @@ void AMyPlayerController::HandleRightClickReleased()
         return;
     }
 
+    APickupActorAAARuneCanvascommonInstrument *RuneCanvasInstrument = Cast<APickupActorAAARuneCanvascommonInstrument>(HeldActor);
+    if (RuneCanvasInstrument && RuneCanvasInstrument->IsRuneDrawActive())
+    {
+        return;
+    }
+
     APickupActorAAARuneGridInstrument *RuneGridInstrument = Cast<APickupActorAAARuneGridInstrument>(HeldActor);
     if (!RuneGridInstrument || !RuneGridInstrument->IsRuneDrawActive())
     {
@@ -310,6 +369,33 @@ void AMyPlayerController::HandleRightClickReleased()
     }
 
     RuneGridInstrument->CommitRuneSequenceAuthority(FinalSequence, SolvingActor);
+}
+
+void AMyPlayerController::HandleMouseWheelUp()
+{
+    if (APickupActorAAARuneCanvascommonInstrument* RuneCanvasInstrument = Cast<APickupActorAAARuneCanvascommonInstrument>(HeldActor))
+    {
+        RuneCanvasInstrument->CycleCardResource(1);
+    }
+}
+
+void AMyPlayerController::HandlePrimaryActionReleased()
+{
+    if (APickupActorAAARuneCanvascommonInstrument* RuneCanvasInstrument = Cast<APickupActorAAARuneCanvascommonInstrument>(HeldActor))
+    {
+        if (RuneCanvasInstrument->IsRuneDrawActive())
+        {
+            RuneCanvasInstrument->EndRuneStroke();
+        }
+    }
+}
+
+void AMyPlayerController::HandleMouseWheelDown()
+{
+    if (APickupActorAAARuneCanvascommonInstrument* RuneCanvasInstrument = Cast<APickupActorAAARuneCanvascommonInstrument>(HeldActor))
+    {
+        RuneCanvasInstrument->CycleCardResource(-1);
+    }
 }
 
 void AMyPlayerController::TryCloseHeldActorBehavior()
@@ -348,6 +434,15 @@ void AMyPlayerController::MoveRight(const FInputActionValue &Value)
 
 void AMyPlayerController::Jump()
 {
+    if (AWomenCharacter *MyChar = Cast<AWomenCharacter>(GetPawn()))
+    {
+        if (MyChar->IsSquat)
+        {
+            SquatTriggered();
+            return;
+        }
+    }
+    
     if (ACharacter *Char = Cast<ACharacter>(GetPawn()))
         Char->Jump();
 }
@@ -379,6 +474,13 @@ void AMyPlayerController::LookUp(const FInputActionValue &Value)
         }
     }
     // ==== 新增结束：矩阵法器绘制期间也锁定视角俯仰 ====
+    if (APickupActorAAARuneCanvascommonInstrument *RuneCanvasInstrument = Cast<APickupActorAAARuneCanvascommonInstrument>(HeldActor))
+    {
+        if (RuneCanvasInstrument->IsRuneDrawActive())
+        {
+            return;
+        }
+    }
 
     float AxisValue = Value.Get<float>();
     AddPitchInput(AxisValue * MouseSensitivity);
@@ -405,6 +507,14 @@ void AMyPlayerController::LookRight(const FInputActionValue &Value)
     }
     // ==== 新增结束：矩阵法器绘制期间也锁定视角左右旋转 ====
 
+    if (APickupActorAAARuneCanvascommonInstrument *RuneCanvasInstrument = Cast<APickupActorAAARuneCanvascommonInstrument>(HeldActor))
+    {
+        if (RuneCanvasInstrument->IsRuneDrawActive())
+        {
+            return;
+        }
+    }
+
     float AxisValue = Value.Get<float>();
     AddYawInput(AxisValue * MouseSensitivity);
 }
@@ -424,6 +534,11 @@ void AMyPlayerController::TryPickup()
 
     UE_LOG(LogTemp, Warning, TEXT("TryPickup call��HeldActor=%s"),
            HeldActor ? *HeldActor->GetName() : TEXT("nullptr"));
+
+    if (TryToggleNearbyDoor())
+    {
+        return;
+    }
     // 如果已经拿着东西，再按一次交互键就改为尝试放下。
     if (HeldActor)
     {
@@ -445,11 +560,92 @@ void AMyPlayerController::TryPickup()
     TryPickupActor(PickupActor);
 }
 
+bool AMyPlayerController::TryToggleNearbyDoor()
+{
+    AConfigurableDoorActor* DoorActor = FindBestInteractableDoor();
+    if (IsValid(DoorActor))
+    {
+        if (!HasAuthority())
+        {
+            ServerToggleDoor(DoorActor);
+            return true;
+        }
+
+        DoorActor->ToggleDoor();
+        return true;
+    }
+
+    return false;
+}
+
+AConfigurableDoorActor* AMyPlayerController::FindBestInteractableDoor() const
+{
+    UWorld* World = GetWorld();
+    APawn* ControlledPawn = GetPawn();
+    if (!World || !IsValid(ControlledPawn))
+    {
+        return nullptr;
+    }
+
+    FVector ViewLocation;
+    FRotator ViewRotation;
+    GetPlayerViewPoint(ViewLocation, ViewRotation);
+
+    AConfigurableDoorActor* BestDoor = nullptr;
+    float BestDistanceSq = TNumericLimits<float>::Max();
+
+    for (TActorIterator<AConfigurableDoorActor> DoorIt(World); DoorIt; ++DoorIt)
+    {
+        AConfigurableDoorActor* CandidateDoor = *DoorIt;
+        if (!IsValid(CandidateDoor) || !CandidateDoor->CanActorInteractFromView(ControlledPawn, ViewLocation, ViewRotation.Vector()))
+        {
+            continue;
+        }
+
+        const float DistanceSq = FVector::DistSquared(ControlledPawn->GetActorLocation(), CandidateDoor->GetActorLocation());
+        if (!BestDoor || DistanceSq < BestDistanceSq)
+        {
+            BestDoor = CandidateDoor;
+            BestDistanceSq = DistanceSq;
+        }
+    }
+
+    return BestDoor;
+}
+
+void AMyPlayerController::ServerToggleDoor_Implementation(AConfigurableDoorActor* DoorActor)
+{
+    if (!IsValid(DoorActor))
+    {
+        return;
+    }
+
+    APawn* ControlledPawn = GetPawn();
+    FVector ViewLocation;
+    FRotator ViewRotation;
+    GetPlayerViewPoint(ViewLocation, ViewRotation);
+
+    if (!IsValid(ControlledPawn) || !DoorActor->CanActorInteractFromView(ControlledPawn, ViewLocation, ViewRotation.Vector()))
+    {
+        return;
+    }
+
+    DoorActor->ToggleDoor();
+}
+
 bool AMyPlayerController::TryPickupActor(APickupActor *PickupActor)
 {
     if (!HasAuthority() || !IsValid(PickupActor) || PickupActor->IsHeldByPlayer())
     {
         return false;
+    }
+
+    if (const APickupActorAAARuneCanvascommonInstrument* RuneCanvasInstrument = Cast<APickupActorAAARuneCanvascommonInstrument>(PickupActor))
+    {
+        if (!RuneCanvasInstrument->CanBePickedUpByPlayer())
+        {
+            return false;
+        }
     }
 
     if (!CanInteractWithPickupActor(PickupActor))
@@ -485,6 +681,7 @@ bool AMyPlayerController::TryPickupActor(APickupActor *PickupActor)
 
     // 重新拿起物体时，把 bob 计时清零，避免沿用上次的相位。
     BobTime = 0.f;
+    ApplySprintAnimationState(MyChar);
 
     UE_LOG(LogTemp, Warning, TEXT("ʰ��: %s"), *HeldActor->GetName());
 
@@ -524,6 +721,11 @@ void AMyPlayerController::TryPutDown()
         HeldActor->OnPutDown(PlaceLocation, PlaceRotation);
         UE_LOG(LogTemp, Warning, TEXT("����: %s"), *HeldActor->GetName());
         HeldActor = nullptr;
+
+         if (AWomenCharacter *MyChar = Cast<AWomenCharacter>(GetPawn()))
+        {
+            ApplySprintAnimationState(MyChar);
+        }
     }
 }
 
@@ -596,6 +798,14 @@ bool AMyPlayerController::TracePickupActorFromView(APickupActor *&OutPickupActor
             if (!IsValid(CandidatePickup) || CandidatePickup->IsHeldByPlayer())
             {
                 continue;
+            }
+
+            if (const APickupActorAAARuneCanvascommonInstrument* RuneCanvasInstrument = Cast<APickupActorAAARuneCanvascommonInstrument>(CandidatePickup))
+            {
+                if (!RuneCanvasInstrument->CanBePickedUpByPlayer())
+                {
+                    continue;
+                }
             }
 
             const USceneComponent *PickupRootComponent = CandidatePickup->GetRootComponent();
@@ -730,6 +940,14 @@ bool AMyPlayerController::CanInteractWithPickupActor(const APickupActor *PickupA
         return false;
     }
 
+    if (const APickupActorAAARuneCanvascommonInstrument* RuneCanvasInstrument = Cast<APickupActorAAARuneCanvascommonInstrument>(PickupActor))
+    {
+        if (!RuneCanvasInstrument->CanBePickedUpByPlayer())
+        {
+            return false;
+        }
+    }
+
     const float MaxInteractDistance = FMath::Max(InteractDistance + 75.f, 75.f);
     return FVector::DistSquared(ControlledPawn->GetActorLocation(), PickupActor->GetActorLocation()) <= FMath::Square(MaxInteractDistance);
 }
@@ -748,26 +966,18 @@ void AMyPlayerController::OnRep_HeldActor()
         if (MyChar)
         {
             MyChar->HideHeldItemThirdPersonDebugMesh();
+            ApplySprintAnimationState(MyChar);
         }
         return;
     }
 
-    // AWomenCharacter *MyChar = Cast<AWomenCharacter>(GetPawn());
-    // if (!MyChar || !MyChar->HoldPoint)
-    // {
-    //     return;
-    // }
     AttachHeldActorToFirstPersonView(HeldActor);
 
     if (MyChar)
     {
         MyChar->ShowHeldItemThirdPersonDebugMesh(HeldActor);
+        ApplySprintAnimationState(MyChar);
     }
-    // HeldActor->AttachToComponent(
-    //     MyChar->HoldPoint,
-    //     FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-    // HeldActor->SetActorRelativeLocation(FVector::ZeroVector);
-    // HeldActor->SetActorRelativeRotation(FRotator::ZeroRotator);
 }
 
 bool AMyPlayerController::AttachHeldActorToFirstPersonView(APickupActor *PickupActor)
@@ -835,6 +1045,16 @@ bool AMyPlayerController::AttachHeldActorToThirdPersonView(APickupActor *PickupA
     return true;
 }
 
+bool AMyPlayerController::CanSprintWithHeldActor() const
+{
+    return !HeldActor || HeldActor->AllowsSprintWhileHeld();
+}
+
+bool AMyPlayerController::CanThrowHeldActor() const
+{
+    return HeldActor && HeldActor->AllowsThrowWhileHeld();
+}
+
 void AMyPlayerController::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
@@ -844,15 +1064,20 @@ void AMyPlayerController::Tick(float DeltaTime)
     {
         UCharacterMovementComponent *MoveComp = Char->GetCharacterMovement();
         float CurrentSpeed = MoveComp->MaxWalkSpeed;
+        const AWomenCharacter* MyChar = Cast<AWomenCharacter>(Char);
+        const bool bIsSquatting = MyChar && MyChar->IsSquat;
+        // const bool bCanSprint = bWantsToSprint && (!MyChar || !MyChar->IsSquat);
+        const bool bCanSprint = bWantsToSprint && CanSprintWithHeldActor() && !MyChar->IsSquat;
 
-        if (bWantsToSprint)
+        if (bCanSprint)
         {
             float NewSpeed = FMath::FInterpConstantTo(CurrentSpeed, RunSpeed, DeltaTime, SpeedUpRate);
             MoveComp->MaxWalkSpeed = NewSpeed;
         }
         else
         {
-            float NewSpeed = FMath::FInterpConstantTo(CurrentSpeed, WalkSpeed, DeltaTime, SpeedDownRate);
+            const float TargetWalkSpeed = bIsSquatting ? CrouchSpeed : WalkSpeed;
+            float NewSpeed = FMath::FInterpConstantTo(CurrentSpeed, TargetWalkSpeed, DeltaTime, SpeedDownRate);
             MoveComp->MaxWalkSpeed = NewSpeed;
         }
     }
@@ -918,6 +1143,23 @@ void AMyPlayerController::ThrowHeldActor()
     if (!HeldActor)
         return;
 
+    if (APickupActorAAARuneCanvascommonInstrument* RuneCanvasInstrument = Cast<APickupActorAAARuneCanvascommonInstrument>(HeldActor))
+    {
+        if (RuneCanvasInstrument->IsRuneDrawActive())
+        {
+            float MouseX = 0.f;
+            float MouseY = 0.f;
+            if (GetMousePosition(MouseX, MouseY))
+            {
+                RuneCanvasInstrument->BeginRuneStroke(this, FVector2D(MouseX, MouseY));
+            }
+            return;
+        }
+    }
+
+    if (!CanThrowHeldActor())
+        return;
+
     AWomenCharacter *MyChar = Cast<AWomenCharacter>(GetPawn());
     if (!MyChar)
         return;
@@ -937,6 +1179,26 @@ void AMyPlayerController::ThrowHeldActor()
 
     if (!HasAuthority())
     {
+
+        StartThrowAnimationState(MyChar);
+
+        const float LocalReleaseDelay = FMath::Max(0.f, ThrowReleaseDelay);
+        const float LocalAnimationEndDelay = LocalReleaseDelay + FMath::Max(0.f, ThrowAnimationRecoveryDelay);
+        const float LocalInputLockEndDelay = FMath::Max(LocalAnimationEndDelay, FMath::Max(0.f, ThrowInputLockDuration));
+
+        FTimerHandle LocalAnimationHandle;
+        GetWorldTimerManager().SetTimer(LocalAnimationHandle, [this, MyChar]()
+            {
+                FinishThrowAnimationState(MyChar);
+            }, LocalAnimationEndDelay, false);
+
+        FTimerHandle LocalMiddleHandle;
+        GetWorldTimerManager().SetTimer(LocalMiddleHandle, [this, MyChar]()
+            {
+                ClearThrowMiddleWindow(MyChar);
+            }, LocalInputLockEndDelay, false);
+
+
         ServerThrowHeldActor();
         return;
     }
@@ -959,7 +1221,11 @@ void AMyPlayerController::ThrowHeldActor()
     // 先把 HeldActor 置空，避免定时器尚未执行前再次被系统当成“仍在手上”。
     float Force = ThrowForce;
     APickupActor *ActorToThrow = HeldActor;
-    // HeldActor = nullptr;
+    if (ActorToThrow)
+    {
+        ActorToThrow->SetOwner(GetPawn());
+        ActorToThrow->SetInstigator(Cast<APawn>(GetPawn()));
+    }
 
     bool bShouldCloseBeforeThrow = true;
     if (const APickupActorAAASlowTalisman *SlowTalisman = Cast<APickupActorAAASlowTalisman>(ActorToThrow))
@@ -1005,6 +1271,40 @@ void AMyPlayerController::ThrowHeldActor()
     const float AnimationEndDelay = ReleaseDelay + FMath::Max(0.f, ThrowAnimationRecoveryDelay);
     const float InputLockEndDelay = FMath::Max(AnimationEndDelay, FMath::Max(0.f, ThrowInputLockDuration));
 
+    const auto BuildReleaseThrowDirection = [this](APickupActor* ActorToThrow, const FVector& ReleaseCameraLocation, const FRotator& ReleaseCameraRotation)
+    {
+        // 获取相机朝向（Rotator 转 Vector）
+        const FVector CameraDirection = ReleaseCameraRotation.Vector();
+
+        // 若目标不存在或目标是特定类型（APickupActorAAARuneCanvascommonInstrument），直接返回相机方向
+        if (!ActorToThrow || Cast<APickupActorAAARuneCanvascommonInstrument>(ActorToThrow))
+        {
+            return CameraDirection;
+        }
+
+        // 计算射线终点（沿相机方向延伸 5000 单位）
+        const FVector AimTraceEnd = ReleaseCameraLocation + CameraDirection * 5000.f;
+        FVector AimTarget = AimTraceEnd;  // 默认瞄准点为射线终点
+
+        // 射线检测结果 & 碰撞查询参数
+        FHitResult ReleaseAimHit;
+        FCollisionQueryParams ReleaseAimParams;
+        ReleaseAimParams.AddIgnoredActor(GetPawn());   // 忽略自身 Pawn
+        ReleaseAimParams.AddIgnoredActor(ActorToThrow);// 忽略待投掷物体
+
+        // 执行可见性通道射线检测，若命中则更新瞄准点为撞击点
+        if (GetWorld() && GetWorld()->LineTraceSingleByChannel(ReleaseAimHit, ReleaseCameraLocation, AimTraceEnd, ECC_Visibility, ReleaseAimParams) && ReleaseAimHit.bBlockingHit)
+        {
+            AimTarget = ReleaseAimHit.ImpactPoint;
+        }
+
+        // 计算“从投掷物到瞄准点”的方向向量（归一化）
+        const FVector DirectionFromCardToAim = (AimTarget - ActorToThrow->GetActorLocation()).GetSafeNormal();
+
+        // 若方向接近零向量，回退到相机方向；否则使用计算后的方向
+        return DirectionFromCardToAim.IsNearlyZero() ? CameraDirection : DirectionFromCardToAim;
+    };
+
     if (MyChar->IsSquat)
     {
         FTimerHandle SquatHandle;
@@ -1016,19 +1316,22 @@ void AMyPlayerController::ThrowHeldActor()
         GetWorldTimerManager().SetTimer(MiddleHandle, [this, MyChar]()
                                         { ClearThrowMiddleWindow(MyChar); }, InputLockEndDelay, false);
 
-        GetWorldTimerManager().SetTimer(ThrowHandle, [this, MyChar, ActorToThrow, Force]()
+        GetWorldTimerManager().SetTimer(ThrowHandle, [this, MyChar, ActorToThrow, Force, &BuildReleaseThrowDirection]()
                                         {
                 if (MyChar && ActorToThrow)
                 {
                     if (HeldActor == ActorToThrow)
                     {
                         HeldActor = nullptr;
+                        ApplySprintAnimationState(MyChar);
                     }
                     FVector ReleaseCameraLocation = FVector::ZeroVector;
                     FRotator ReleaseCameraRotation = FRotator::ZeroRotator;
                     GetPlayerViewPoint(ReleaseCameraLocation, ReleaseCameraRotation);
 
                     ActorToThrow->OnThrown(ReleaseCameraRotation.Vector(), Force);
+                    ActorToThrow->OnThrown(BuildReleaseThrowDirection(ActorToThrow, ReleaseCameraLocation, ReleaseCameraRotation), Force);
+
                 } }, ReleaseDelay, false);
     }
     else
@@ -1041,7 +1344,7 @@ void AMyPlayerController::ThrowHeldActor()
                                         { FinishThrowAnimationState(MyChar); }, AnimationEndDelay, false);
         GetWorldTimerManager().SetTimer(MiddleHandle, [this, MyChar]()
                                         { ClearThrowMiddleWindow(MyChar); }, InputLockEndDelay, false);
-        GetWorldTimerManager().SetTimer(ThrowHandle, [this, MyChar, ActorToThrow, Force]()
+        GetWorldTimerManager().SetTimer(ThrowHandle, [this, MyChar, ActorToThrow, Force, &BuildReleaseThrowDirection]()
                                         {
                 if (MyChar && ActorToThrow)
                 {
@@ -1049,33 +1352,17 @@ void AMyPlayerController::ThrowHeldActor()
                     if (HeldActor == ActorToThrow)
                     {
                         HeldActor = nullptr;
+                        ApplySprintAnimationState(MyChar);
                     }
                     FVector ReleaseCameraLocation = FVector::ZeroVector;
                     FRotator ReleaseCameraRotation = FRotator::ZeroRotator;
                     GetPlayerViewPoint(ReleaseCameraLocation, ReleaseCameraRotation);
 
-                    ActorToThrow->OnThrown(ReleaseCameraRotation.Vector(), Force);
+                    ActorToThrow->OnThrown(BuildReleaseThrowDirection(ActorToThrow, ReleaseCameraLocation, ReleaseCameraRotation), Force);
                 } }, ReleaseDelay, false);
     }
 }
 
-// void AMyPlayerController::UpdateHeldRuneInstrumentDraw()
-// {
-//     APickupActorAAARuneInstrument* RuneInstrument = Cast<APickupActorAAARuneInstrument>(HeldActor);
-
-//     {
-//         return;
-//     }
-
-//     float MouseX = 0.f;
-//     float MouseY = 0.f;
-//     if (!GetMousePosition(MouseX, MouseY))
-//     {
-//         return;
-//     }
-
-//     RuneInstrument->UpdateRuneDrawFromScreenPosition(this, FVector2D(MouseX, MouseY));
-// }
 void AMyPlayerController::UpdateHeldRuneInstrumentDraw()
 {
     APickupActorAAARuneInstrument *RuneInstrument = Cast<APickupActorAAARuneInstrument>(HeldActor);
@@ -1089,6 +1376,20 @@ void AMyPlayerController::UpdateHeldRuneInstrumentDraw()
         }
 
         RuneInstrument->UpdateRuneDrawFromScreenPosition(this, FVector2D(MouseX, MouseY));
+        return;
+    }
+
+    APickupActorAAARuneCanvascommonInstrument *RuneCanvasInstrument = Cast<APickupActorAAARuneCanvascommonInstrument>(HeldActor);
+    if (RuneCanvasInstrument && RuneCanvasInstrument->IsRuneStrokeActive())
+    {
+        float MouseX = 0.f;
+        float MouseY = 0.f;
+        if (!GetMousePosition(MouseX, MouseY))
+        {
+            return;
+        }
+
+        RuneCanvasInstrument->UpdateRuneDrawFromScreenPosition(this, FVector2D(MouseX, MouseY));
         return;
     }
 
@@ -1130,6 +1431,31 @@ void AMyPlayerController::StartThrowAnimationState(AWomenCharacter *MyChar) cons
     MyChar->IsSquatThrowing = false;
 }
 
+
+bool AMyPlayerController::IsThrowStateActive(const AWomenCharacter* MyChar) const
+{
+    return MyChar
+        && (MyChar->IsMiddleHandleTime || MyChar->IsSquatThrowing || MyChar->IsStandThrowing);
+}
+
+void AMyPlayerController::ApplySprintAnimationState(AWomenCharacter* MyChar)
+{
+    if (!MyChar)
+    {
+        return;
+    }
+
+    const bool bCanSprint = bWantsToSprint && CanSprintWithHeldActor() && !MyChar->IsSquat;
+    MyChar->IsSprint = bCanSprint;
+
+    if (!HasAuthority())
+    {
+        ServerSetSprintState(bWantsToSprint);
+    }
+}
+
+
+
 void AMyPlayerController::FinishThrowAnimationState(AWomenCharacter *MyChar) const
 {
     if (!MyChar)
@@ -1141,7 +1467,7 @@ void AMyPlayerController::FinishThrowAnimationState(AWomenCharacter *MyChar) con
     MyChar->IsStandThrowing = false;
 }
 
-void AMyPlayerController::ClearThrowMiddleWindow(AWomenCharacter *MyChar) const
+void AMyPlayerController::ClearThrowMiddleWindow(AWomenCharacter *MyChar)
 {
     if (!MyChar)
     {
@@ -1149,37 +1475,51 @@ void AMyPlayerController::ClearThrowMiddleWindow(AWomenCharacter *MyChar) const
     }
 
     MyChar->IsMiddleHandleTime = false;
+
+    if (!IsThrowStateActive(MyChar))
+    {
+        if (bHasDeferredSprintInput)
+        {
+            bWantsToSprint = bDeferredWantsToSprint;
+            bHasDeferredSprintInput = false;
+        }
+        ApplySprintAnimationState(MyChar);
+    }
 }
 
 void AMyPlayerController::SprintStart()
 {
-    bWantsToSprint = true;
     AWomenCharacter *MyChar = Cast<AWomenCharacter>(GetPawn());
-    if (MyChar)
+    if (!CanSprintWithHeldActor())
     {
-        // 动画蓝图通过这个状态位切到冲刺表现。
-        MyChar->IsSprint = true;
+        bWantsToSprint = true;
+        ApplySprintAnimationState(MyChar);
+        return;
     }
 
-    if (!HasAuthority())
+    if (IsThrowStateActive(MyChar))
     {
-        ServerSetSprintState(true);
+        bHasDeferredSprintInput = true;
+        bDeferredWantsToSprint = true;
+        return;
     }
+
+    bWantsToSprint = true;
+    ApplySprintAnimationState(MyChar);
 }
 
 void AMyPlayerController::SprintStop()
 {
-    bWantsToSprint = false;
     AWomenCharacter *MyChar = Cast<AWomenCharacter>(GetPawn());
-    if (MyChar)
+    if (IsThrowStateActive(MyChar))
     {
-        MyChar->IsSprint = false;
+        bHasDeferredSprintInput = true;
+        bDeferredWantsToSprint = false;
+        return;
     }
 
-    if (!HasAuthority())
-    {
-        ServerSetSprintState(false);
-    }
+    bWantsToSprint = false;
+    ApplySprintAnimationState(MyChar);
 }
 
 void AMyPlayerController::SquatTriggered()
@@ -1189,6 +1529,7 @@ void AMyPlayerController::SquatTriggered()
     {
         // 这里是纯状态切换；真正的动画表现由 AnimInstance 读取这个布尔值。
         MyChar->IsSquat = !MyChar->IsSquat;
+        ApplySprintAnimationState(MyChar);
     }
 
     if (!HasAuthority())
@@ -1212,23 +1553,6 @@ void AMyPlayerController::ServerTogglePickupActor_Implementation(APickupActor *P
     TryTogglePickupActor(PickupActor);
 }
 
-// void AMyPlayerController::ServerSubmitRuneSequence_Implementation(
-//     APickupActorAAARuneInstrument* RuneInstrument,
-//     const TArray<int32>& NodeSequence)
-// {
-//     if (!IsValid(RuneInstrument) || RuneInstrument != HeldActor)
-//     {
-//         return;
-//     }
-
-//     AActor* SolvingActor = GetPawn();
-//     if (!IsValid(SolvingActor))
-//     {
-//         SolvingActor = this;
-//     }
-
-//     RuneInstrument->CommitRuneSequenceAuthority(NodeSequence, SolvingActor);
-// }
 void AMyPlayerController::ServerSubmitRuneSequence_Implementation(
     APickupActor *RuneActor,
     const TArray<int32> &NodeSequence)
@@ -1257,8 +1581,14 @@ void AMyPlayerController::ServerSubmitRuneSequence_Implementation(
     if (APickupActorAAARuneGridInstrument *RuneGridInstrument = Cast<APickupActorAAARuneGridInstrument>(RuneActor))
     {
         RuneGridInstrument->CommitRuneSequenceAuthority(NodeSequence, SolvingActor);
+        return;
     }
-    // ==== 新增结束：服务端统一接收“原符器 / 矩阵法器”两种结果 ====
+
+    if (APickupActorAAARuneCanvascommonInstrument *RuneCanvasInstrument = Cast<APickupActorAAARuneCanvascommonInstrument>(RuneActor))
+    {
+        RuneCanvasInstrument->CommitRuneSequenceAuthority(NodeSequence, SolvingActor);
+        // ==== 新增结束：服务端统一接收“原符器 / 矩阵法器”两种结果 ====
+    }
 }
 
 void AMyPlayerController::ServerThrowHeldActor_Implementation()
@@ -1272,7 +1602,7 @@ void AMyPlayerController::ServerSetSprintState_Implementation(bool bNewWantsToSp
 
     if (AWomenCharacter *MyChar = Cast<AWomenCharacter>(GetPawn()))
     {
-        MyChar->IsSprint = bNewWantsToSprint;
+        MyChar->IsSprint = bNewWantsToSprint && CanSprintWithHeldActor() && !MyChar->IsSquat;
     }
 }
 
@@ -1281,5 +1611,6 @@ void AMyPlayerController::ServerToggleSquatState_Implementation()
     if (AWomenCharacter *MyChar = Cast<AWomenCharacter>(GetPawn()))
     {
         MyChar->IsSquat = !MyChar->IsSquat;
+        ApplySprintAnimationState(MyChar);
     }
 }

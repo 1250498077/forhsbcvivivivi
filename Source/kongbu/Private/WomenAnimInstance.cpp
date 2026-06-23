@@ -35,19 +35,6 @@ void UWomenAnimInstance::NativeUpdateAnimation(float DeltaTime)
         Pitch = ControlRot.Pitch;
         if (Pitch > 180.f) Pitch -= 360.f;
         Pitch = -Pitch;
-
-        // 第一人称下半身需要腿部继续播放走/跑/蹲动画，
-        // 但胸腹/腰部以上不要跟着相机 Pitch 弯到镜头里。
-        // 如果该 Mesh 使用的是 UWomenAnimInstance 动画蓝图，这里直接把 Pitch 归零。
-        if (const USkeletalMeshComponent* MeshComponent = GetSkelMeshComponent())
-        {
-            if (MeshComponent->GetFName() == TEXT("FirstPersonLowerBodyMesh"))
-            {
-                Pitch = 0.f;
-            }
-        }
-
-
     }
 
 

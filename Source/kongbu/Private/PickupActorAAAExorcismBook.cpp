@@ -75,10 +75,10 @@ void APickupActorAAAExorcismBook::LoadBookData()
         }
 
         UE_LOG(LogTemp, Log,
-            TEXT("Slot %d: GhostType=%d GhostMesh=%s BookGhostImage=%s RunePattern=%s RuneTexture=%s Nodes=[%s]"),
+            TEXT("Slot %d: GhostType=%d GhostClass=%s BookGhostImage=%s RunePattern=%s RuneTexture=%s Nodes=[%s]"),
             Slot.SlotIndex,
             Slot.Ghost.GhostTypeIndex,
-            *Slot.Ghost.GhostMeshPath.ToString(),
+            *Slot.Ghost.GhostClassPath.ToString(),
             *Slot.Ghost.BookGhostImagePath.ToString(),
             *Slot.Rune.PatternId.ToString(),
             *Slot.Rune.TexturePath.ToString(),
