@@ -1,4 +1,20 @@
-UHT compiled-in object format Default
-  Parsing headers for kongbuEditor
-    Running Internal UnrealHeaderTool D:\game\kongbu\kongbu.uproject D:\game\kongbu\Intermediate\Build\Win64\kongbuEditor\Development\kongbuEditor.uhtmanifest -WarningsAsErrors -installed
-  D:\game\kongbu\Source\kongbu\Public\PickupActorAAARuneCanvasInstrument.h(448): Error: The type 'TArray<TObjectPtr<UStaticMeshComponent>>' can not be used as a value in a TMap
+LoginId:05f46f954f05178bb4c607b51e2e3bf2
+EpicAccountId:a11fbf1ee58c42e09f121beb249a51f1
+
+Unhandled Exception: EXCEPTION_ACCESS_VIOLATION reading address 0xffffffffffffffff
+
+UnrealEditor_kongbu!`AMyPlayerController::ThrowHeldActor'::`2'::<lambda_3>::operator()() [D:\game\kongbu\Source\kongbu\Private\MyPlayerController.cpp:1292]
+UnrealEditor_kongbu!`AMyPlayerController::ThrowHeldActor'::`69'::<lambda_9>::operator()() [D:\game\kongbu\Source\kongbu\Private\MyPlayerController.cpp:1361]
+UnrealEditor_Engine
+UnrealEditor_Engine
+UnrealEditor_Engine
+UnrealEditor_UnrealEd
+UnrealEditor_UnrealEd
+UnrealEditor
+UnrealEditor
+UnrealEditor
+UnrealEditor
+UnrealEditor
+UnrealEditor
+kernel32
+ntdll
