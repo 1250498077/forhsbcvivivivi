@@ -119,6 +119,9 @@ public:
         return RecognizedNodeSequence;
     }
 
+    UFUNCTION(BlueprintPure, Category = "RuneCanvas|Recognition|Similarity")
+    float GetCurrentCardSequenceSimilarityPercent() const;
+
     UFUNCTION(BlueprintPure, Category = "RuneCanvas")
     TArray<FVector2D> GetDrawnUVPoints() const
     {
@@ -391,6 +394,8 @@ protected:
 
     virtual void OnRuneCanvasAttachedToSurface();
     virtual void OnRuneCanvasDetachedFromSurface();
+    virtual bool TryHandleRuneCanvasThrownImpact(const FHitResult &Hit, UPrimitiveComponent *HitComponent);
+    virtual const TArray<int32> &GetExpectedNodeSequenceForCurrentCard() const;
     void DisableAndHideRuneCanvasForLifetime(float LifeSpanSeconds);
 
 private:
@@ -459,7 +464,6 @@ private:
     void UpdateActivationVisualState();
     void LoadCardResources();
     void ApplyCurrentCardResourceTexture();
-    const TArray<int32> &GetExpectedNodeSequenceForCurrentCard() const;
     float CalculateNodeSequenceSimilarityPercent(const TArray<int32> &ExpectedNodeSequence, const TArray<int32> &UserNodeSequence) const;
     float CalculateBidirectionalCoverageScore(const TArray<int32> &SourceNodeSequence, const TArray<int32> &TargetNodeSequence) const;
     float CalculateWeightedEditSimilarityScore(const TArray<int32> &ExpectedNodeSequence, const TArray<int32> &UserNodeSequence) const;

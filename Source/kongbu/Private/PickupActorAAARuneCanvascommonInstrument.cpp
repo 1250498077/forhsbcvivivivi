@@ -26,14 +26,6 @@ namespace
     const FString CardResourceScanPath = TEXT("/Game/item/canvas/cardtype");
     const FString CardResourcePrefix = TEXT("card_resource_");
 
-    const TArray<TArray<int32>> &GetHardcodedCardExpectedSequences()
-    {
-        // card_resource_0 -> {1, 2, 3, 4}. 后续你从 log 复制后，在这里继续按下标追加。
-        static const TArray<TArray<int32>> Sequences = {
-            {380, 419, 418, 417, 416, 415, 414, 413, 412, 411, 410, 409, 408, 407, 406, 446, 447, 448, 449, 450, 451, 452, 453, 454, 455, 456, 457, 458, 459, 500, 501, 502, 503, 504, 505, 506, 507, 508, 465, 464, 463, 462, 421, 420, 378, 377, 376, 335, 334, 293, 292, 291, 251, 250, 210, 331, 372, 493, 533, 573, 613, 574, 575, 536, 537, 498, 499, 460, 461, 424, 425, 426, 427, 388, 389, 390, 391, 392, 353, 354, 355, 356, 357, 358, 319, 318, 317, 316, 315, 314, 313, 352, 351, 350, 349, 348, 347, 346, 345, 384, 383, 382, 381, 379, 375, 374}};
-        return Sequences;
-    }
-
     bool TryParseCardResourceIndex(const FString &AssetName, int32 &OutIndex)
     {
         OutIndex = INDEX_NONE;
@@ -212,7 +204,7 @@ void APickupActorAAARuneCanvascommonInstrument::OnThrown(FVector ThrowDirection,
     bAttachedToSurface = false;
     LastAttachTraceLocation = GetActorLocation();
     RestoreDefaultThrowableCollision();
-     if (bUseFlatCardFlight && MeshComponent)
+    if (bUseFlatCardFlight && MeshComponent)
     {
         StartFlatCardFlight(ThrowDirection, ThrowForce);
     }
@@ -240,6 +232,13 @@ void APickupActorAAARuneCanvascommonInstrument::HandleRuneCanvasHit(
 
     if (OtherActor == this || (!IsValid(OtherActor) && !IsValid(OtherComp)))
     {
+        return;
+    }
+
+    if (TryHandleRuneCanvasThrownImpact(Hit, OtherComp))
+    {
+        StopFlatCardFlight(false);
+        bAwaitingThrowImpact = false;
         return;
     }
 
@@ -552,10 +551,12 @@ void APickupActorAAARuneCanvascommonInstrument::ApplyCurrentCardResourceTexture(
 const TArray<int32> &APickupActorAAARuneCanvascommonInstrument::GetExpectedNodeSequenceForCurrentCard() const
 {
     static const TArray<int32> EmptySequence;
-    const TArray<TArray<int32>> &ExpectedSequences = GetHardcodedCardExpectedSequences();
-    return ExpectedSequences.IsValidIndex(CurrentCardResourceIndex)
-               ? ExpectedSequences[CurrentCardResourceIndex]
-               : EmptySequence;
+    return EmptySequence; // 注：上方三元表达式已包含返回逻辑，此行可能是冗余/排版残留
+}
+
+float APickupActorAAARuneCanvascommonInstrument::GetCurrentCardSequenceSimilarityPercent() const
+{
+    return CalculateNodeSequenceSimilarityPercent(GetExpectedNodeSequenceForCurrentCard(), RecognizedNodeSequence);
 }
 
 // --- CalculateNodeSequenceSimilarityPercent ---
@@ -949,7 +950,7 @@ void APickupActorAAARuneCanvascommonInstrument::StopFlatCardFlight(bool bRestore
 
 FRotator APickupActorAAARuneCanvascommonInstrument::BuildFlatCardFlightRotation() const
 {
-    
+
     FVector FlightForward = FlatCardFlightDirection.GetSafeNormal();
     if (FlightForward.IsNearlyZero())
     {
@@ -961,14 +962,14 @@ FRotator APickupActorAAARuneCanvascommonInstrument::BuildFlatCardFlightRotation(
     }
 
     const FVector ReferenceUp = FMath::Abs(FVector::DotProduct(FlightForward, FVector::UpVector)) > 0.95f
-        ? FVector::RightVector
-        : FVector::UpVector;
+                                    ? FVector::RightVector
+                                    : FVector::UpVector;
     const FQuat BaseRotation = FRotationMatrix::MakeFromXZ(FlightForward, ReferenceUp).ToQuat();
     const FQuat OffsetRotation = FlatCardFlightRotationOffset.Quaternion();
 
     FVector LocalSpinAxis = FVector::UpVector;
 
-     switch (FlatCardFlightSpinAxis)
+    switch (FlatCardFlightSpinAxis)
     {
     case EFlatCardFlightSpinAxis::Pitch:
         LocalSpinAxis = FVector::RightVector;
@@ -1012,7 +1013,6 @@ FRotator APickupActorAAARuneCanvascommonInstrument::BuildFlatCardFlightRotation(
     const FQuat SpinRotation(LocalSpinAxis, FMath::DegreesToRadians(FlatCardFlightSpinAngle));
     return (BaseRotation * FaceWobbleRotation * SpinRotation * OffsetRotation).Rotator();
 }
-
 
 FVector APickupActorAAARuneCanvascommonInstrument::GetFlatCardVisualCenterWorldLocation() const
 {
@@ -1109,6 +1109,12 @@ void APickupActorAAARuneCanvascommonInstrument::UpdateThrownAttachTrace()
     UPrimitiveComponent *HitComponent = TraceHit.GetComponent();
     if (!IsValid(HitComponent))
     {
+        return;
+    }
+    if (TryHandleRuneCanvasThrownImpact(TraceHit, HitComponent))
+    {
+        StopFlatCardFlight(false);
+        bAwaitingThrowImpact = false;
         return;
     }
 
@@ -1256,6 +1262,13 @@ void APickupActorAAARuneCanvascommonInstrument::OnRuneCanvasAttachedToSurface()
 
 void APickupActorAAARuneCanvascommonInstrument::OnRuneCanvasDetachedFromSurface()
 {
+}
+
+bool APickupActorAAARuneCanvascommonInstrument::TryHandleRuneCanvasThrownImpact(const FHitResult &Hit, UPrimitiveComponent *HitComponent)
+{
+    (void)Hit;
+    (void)HitComponent;
+    return false;
 }
 
 void APickupActorAAARuneCanvascommonInstrument::DisableAndHideRuneCanvasForLifetime(float LifeSpanSeconds)

@@ -83,6 +83,9 @@ protected:
     /** Canvas 从表面脱离时调用：清除所有活跃链条。 */
     virtual void OnRuneCanvasDetachedFromSurface() override;
 
+    /** 返回链卡当前 card_resource_x 对应的期望节点序列。 */
+    virtual const TArray<int32> &GetExpectedNodeSequenceForCurrentCard() const override;
+
     // =========================================================================
     // Components
     // =========================================================================

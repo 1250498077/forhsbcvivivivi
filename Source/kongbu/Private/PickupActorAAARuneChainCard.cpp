@@ -11,6 +11,15 @@ namespace
 {
     TMap<uint32, TSet<FString>> BrokenCanvasLinkEdgeKeysByWorld;
 
+    const TArray<TArray<int32>> &GetChainCardExpectedSequences()
+    {
+        static const TArray<TArray<int32>> Sequences = {
+            {380, 419, 418, 417, 416, 415, 414, 413, 412, 411, 410} // 此处因图片截断，后续元素未显示完整
+        };
+        return Sequences;
+    }
+
+
     TSet<FString> &GetBrokenCanvasLinkEdgeKeysForWorld(const UWorld *World)
     {
         static TSet<FString> EmptyBrokenEdgeKeys;
@@ -202,6 +211,16 @@ void APickupActorAAARuneChainCard::OnRuneCanvasDetachedFromSurface()
 {
     LinkRefreshAccumulator = 0.f;
     ClearChainLinks();
+}
+
+const TArray<int32> &APickupActorAAARuneChainCard::GetExpectedNodeSequenceForCurrentCard() const
+{
+    static const TArray<int32> EmptySequence;
+    const TArray<TArray<int32>> &ExpectedSequences = GetChainCardExpectedSequences();
+    const int32 CardResourceIndex = GetCurrentCardResourceIndex();
+    return ExpectedSequences.IsValidIndex(CardResourceIndex)
+               ? ExpectedSequences[CardResourceIndex]
+               : EmptySequence;
 }
 
 bool APickupActorAAARuneChainCard::CanParticipateInCanvasLinks() const

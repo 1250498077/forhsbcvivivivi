@@ -1,6 +1,6 @@
 
 #include "MyPlayerController.h"
-#include "WomenCharacter.h" 
+#include "WomenCharacter.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
@@ -254,7 +254,7 @@ void AMyPlayerController::HandleRightClickPressed()
                 return;
             }
 
-            AActor* SolvingActor = GetPawn();
+            AActor *SolvingActor = GetPawn();
             if (!IsValid(SolvingActor))
             {
                 SolvingActor = this;
@@ -373,7 +373,7 @@ void AMyPlayerController::HandleRightClickReleased()
 
 void AMyPlayerController::HandleMouseWheelUp()
 {
-    if (APickupActorAAARuneCanvascommonInstrument* RuneCanvasInstrument = Cast<APickupActorAAARuneCanvascommonInstrument>(HeldActor))
+    if (APickupActorAAARuneCanvascommonInstrument *RuneCanvasInstrument = Cast<APickupActorAAARuneCanvascommonInstrument>(HeldActor))
     {
         RuneCanvasInstrument->CycleCardResource(1);
     }
@@ -381,7 +381,7 @@ void AMyPlayerController::HandleMouseWheelUp()
 
 void AMyPlayerController::HandlePrimaryActionReleased()
 {
-    if (APickupActorAAARuneCanvascommonInstrument* RuneCanvasInstrument = Cast<APickupActorAAARuneCanvascommonInstrument>(HeldActor))
+    if (APickupActorAAARuneCanvascommonInstrument *RuneCanvasInstrument = Cast<APickupActorAAARuneCanvascommonInstrument>(HeldActor))
     {
         if (RuneCanvasInstrument->IsRuneDrawActive())
         {
@@ -392,7 +392,7 @@ void AMyPlayerController::HandlePrimaryActionReleased()
 
 void AMyPlayerController::HandleMouseWheelDown()
 {
-    if (APickupActorAAARuneCanvascommonInstrument* RuneCanvasInstrument = Cast<APickupActorAAARuneCanvascommonInstrument>(HeldActor))
+    if (APickupActorAAARuneCanvascommonInstrument *RuneCanvasInstrument = Cast<APickupActorAAARuneCanvascommonInstrument>(HeldActor))
     {
         RuneCanvasInstrument->CycleCardResource(-1);
     }
@@ -442,7 +442,7 @@ void AMyPlayerController::Jump()
             return;
         }
     }
-    
+
     if (ACharacter *Char = Cast<ACharacter>(GetPawn()))
         Char->Jump();
 }
@@ -562,7 +562,7 @@ void AMyPlayerController::TryPickup()
 
 bool AMyPlayerController::TryToggleNearbyDoor()
 {
-    AConfigurableDoorActor* DoorActor = FindBestInteractableDoor();
+    AConfigurableDoorActor *DoorActor = FindBestInteractableDoor();
     if (IsValid(DoorActor))
     {
         if (!HasAuthority())
@@ -578,10 +578,10 @@ bool AMyPlayerController::TryToggleNearbyDoor()
     return false;
 }
 
-AConfigurableDoorActor* AMyPlayerController::FindBestInteractableDoor() const
+AConfigurableDoorActor *AMyPlayerController::FindBestInteractableDoor() const
 {
-    UWorld* World = GetWorld();
-    APawn* ControlledPawn = GetPawn();
+    UWorld *World = GetWorld();
+    APawn *ControlledPawn = GetPawn();
     if (!World || !IsValid(ControlledPawn))
     {
         return nullptr;
@@ -591,12 +591,12 @@ AConfigurableDoorActor* AMyPlayerController::FindBestInteractableDoor() const
     FRotator ViewRotation;
     GetPlayerViewPoint(ViewLocation, ViewRotation);
 
-    AConfigurableDoorActor* BestDoor = nullptr;
+    AConfigurableDoorActor *BestDoor = nullptr;
     float BestDistanceSq = TNumericLimits<float>::Max();
 
     for (TActorIterator<AConfigurableDoorActor> DoorIt(World); DoorIt; ++DoorIt)
     {
-        AConfigurableDoorActor* CandidateDoor = *DoorIt;
+        AConfigurableDoorActor *CandidateDoor = *DoorIt;
         if (!IsValid(CandidateDoor) || !CandidateDoor->CanActorInteractFromView(ControlledPawn, ViewLocation, ViewRotation.Vector()))
         {
             continue;
@@ -613,14 +613,14 @@ AConfigurableDoorActor* AMyPlayerController::FindBestInteractableDoor() const
     return BestDoor;
 }
 
-void AMyPlayerController::ServerToggleDoor_Implementation(AConfigurableDoorActor* DoorActor)
+void AMyPlayerController::ServerToggleDoor_Implementation(AConfigurableDoorActor *DoorActor)
 {
     if (!IsValid(DoorActor))
     {
         return;
     }
 
-    APawn* ControlledPawn = GetPawn();
+    APawn *ControlledPawn = GetPawn();
     FVector ViewLocation;
     FRotator ViewRotation;
     GetPlayerViewPoint(ViewLocation, ViewRotation);
@@ -640,7 +640,7 @@ bool AMyPlayerController::TryPickupActor(APickupActor *PickupActor)
         return false;
     }
 
-    if (const APickupActorAAARuneCanvascommonInstrument* RuneCanvasInstrument = Cast<APickupActorAAARuneCanvascommonInstrument>(PickupActor))
+    if (const APickupActorAAARuneCanvascommonInstrument *RuneCanvasInstrument = Cast<APickupActorAAARuneCanvascommonInstrument>(PickupActor))
     {
         if (!RuneCanvasInstrument->CanBePickedUpByPlayer())
         {
@@ -722,7 +722,7 @@ void AMyPlayerController::TryPutDown()
         UE_LOG(LogTemp, Warning, TEXT("����: %s"), *HeldActor->GetName());
         HeldActor = nullptr;
 
-         if (AWomenCharacter *MyChar = Cast<AWomenCharacter>(GetPawn()))
+        if (AWomenCharacter *MyChar = Cast<AWomenCharacter>(GetPawn()))
         {
             ApplySprintAnimationState(MyChar);
         }
@@ -800,7 +800,7 @@ bool AMyPlayerController::TracePickupActorFromView(APickupActor *&OutPickupActor
                 continue;
             }
 
-            if (const APickupActorAAARuneCanvascommonInstrument* RuneCanvasInstrument = Cast<APickupActorAAARuneCanvascommonInstrument>(CandidatePickup))
+            if (const APickupActorAAARuneCanvascommonInstrument *RuneCanvasInstrument = Cast<APickupActorAAARuneCanvascommonInstrument>(CandidatePickup))
             {
                 if (!RuneCanvasInstrument->CanBePickedUpByPlayer())
                 {
@@ -940,7 +940,7 @@ bool AMyPlayerController::CanInteractWithPickupActor(const APickupActor *PickupA
         return false;
     }
 
-    if (const APickupActorAAARuneCanvascommonInstrument* RuneCanvasInstrument = Cast<APickupActorAAARuneCanvascommonInstrument>(PickupActor))
+    if (const APickupActorAAARuneCanvascommonInstrument *RuneCanvasInstrument = Cast<APickupActorAAARuneCanvascommonInstrument>(PickupActor))
     {
         if (!RuneCanvasInstrument->CanBePickedUpByPlayer())
         {
@@ -1064,7 +1064,7 @@ void AMyPlayerController::Tick(float DeltaTime)
     {
         UCharacterMovementComponent *MoveComp = Char->GetCharacterMovement();
         float CurrentSpeed = MoveComp->MaxWalkSpeed;
-        const AWomenCharacter* MyChar = Cast<AWomenCharacter>(Char);
+        const AWomenCharacter *MyChar = Cast<AWomenCharacter>(Char);
         const bool bIsSquatting = MyChar && MyChar->IsSquat;
         // const bool bCanSprint = bWantsToSprint && (!MyChar || !MyChar->IsSquat);
         const bool bCanSprint = bWantsToSprint && CanSprintWithHeldActor() && !MyChar->IsSquat;
@@ -1143,7 +1143,7 @@ void AMyPlayerController::ThrowHeldActor()
     if (!HeldActor)
         return;
 
-    if (APickupActorAAARuneCanvascommonInstrument* RuneCanvasInstrument = Cast<APickupActorAAARuneCanvascommonInstrument>(HeldActor))
+    if (APickupActorAAARuneCanvascommonInstrument *RuneCanvasInstrument = Cast<APickupActorAAARuneCanvascommonInstrument>(HeldActor))
     {
         if (RuneCanvasInstrument->IsRuneDrawActive())
         {
@@ -1188,16 +1188,19 @@ void AMyPlayerController::ThrowHeldActor()
 
         FTimerHandle LocalAnimationHandle;
         GetWorldTimerManager().SetTimer(LocalAnimationHandle, [this, MyChar]()
-            {
-                FinishThrowAnimationState(MyChar);
-            }, LocalAnimationEndDelay, false);
+                                        { 
+                                            if (IsValid(MyChar))
+                                            {
+                                                FinishThrowAnimationState(MyChar);
+                                            } }, LocalAnimationEndDelay, false);
 
         FTimerHandle LocalMiddleHandle;
         GetWorldTimerManager().SetTimer(LocalMiddleHandle, [this, MyChar]()
-            {
-                ClearThrowMiddleWindow(MyChar);
-            }, LocalInputLockEndDelay, false);
-
+                                        { 
+                                            if (IsValid(MyChar))
+                                            {
+                                                ClearThrowMiddleWindow(MyChar);
+                                            } }, LocalInputLockEndDelay, false);
 
         ServerThrowHeldActor();
         return;
@@ -1271,7 +1274,7 @@ void AMyPlayerController::ThrowHeldActor()
     const float AnimationEndDelay = ReleaseDelay + FMath::Max(0.f, ThrowAnimationRecoveryDelay);
     const float InputLockEndDelay = FMath::Max(AnimationEndDelay, FMath::Max(0.f, ThrowInputLockDuration));
 
-    const auto BuildReleaseThrowDirection = [this](APickupActor* ActorToThrow, const FVector& ReleaseCameraLocation, const FRotator& ReleaseCameraRotation)
+    const auto BuildReleaseThrowDirection = [this](APickupActor *ActorToThrow, const FVector &ReleaseCameraLocation, const FRotator &ReleaseCameraRotation)
     {
         // 获取相机朝向（Rotator 转 Vector）
         const FVector CameraDirection = ReleaseCameraRotation.Vector();
@@ -1284,13 +1287,13 @@ void AMyPlayerController::ThrowHeldActor()
 
         // 计算射线终点（沿相机方向延伸 5000 单位）
         const FVector AimTraceEnd = ReleaseCameraLocation + CameraDirection * 5000.f;
-        FVector AimTarget = AimTraceEnd;  // 默认瞄准点为射线终点
+        FVector AimTarget = AimTraceEnd; // 默认瞄准点为射线终点
 
         // 射线检测结果 & 碰撞查询参数
         FHitResult ReleaseAimHit;
         FCollisionQueryParams ReleaseAimParams;
-        ReleaseAimParams.AddIgnoredActor(GetPawn());   // 忽略自身 Pawn
-        ReleaseAimParams.AddIgnoredActor(ActorToThrow);// 忽略待投掷物体
+        ReleaseAimParams.AddIgnoredActor(GetPawn());    // 忽略自身 Pawn
+        ReleaseAimParams.AddIgnoredActor(ActorToThrow); // 忽略待投掷物体
 
         // 执行可见性通道射线检测，若命中则更新瞄准点为撞击点
         if (GetWorld() && GetWorld()->LineTraceSingleByChannel(ReleaseAimHit, ReleaseCameraLocation, AimTraceEnd, ECC_Visibility, ReleaseAimParams) && ReleaseAimHit.bBlockingHit)
@@ -1310,29 +1313,36 @@ void AMyPlayerController::ThrowHeldActor()
         FTimerHandle SquatHandle;
         FTimerHandle MiddleHandle;
         FTimerHandle ThrowHandle;
-        
+
         GetWorldTimerManager().SetTimer(SquatHandle, [this, MyChar]()
-                                        { FinishThrowAnimationState(MyChar); }, AnimationEndDelay, false);
-        GetWorldTimerManager().SetTimer(MiddleHandle, [this, MyChar]()
-                                        { ClearThrowMiddleWindow(MyChar); }, InputLockEndDelay, false);
-
-        GetWorldTimerManager().SetTimer(ThrowHandle, [this, MyChar, ActorToThrow, Force, &BuildReleaseThrowDirection]()
                                         {
-                if (MyChar && ActorToThrow)
-                {
-                    if (HeldActor == ActorToThrow)
-                    {
-                        HeldActor = nullptr;
-                        ApplySprintAnimationState(MyChar);
-                    }
-                    FVector ReleaseCameraLocation = FVector::ZeroVector;
-                    FRotator ReleaseCameraRotation = FRotator::ZeroRotator;
-                    GetPlayerViewPoint(ReleaseCameraLocation, ReleaseCameraRotation);
+          if (IsValid(MyChar))
+          {
+              FinishThrowAnimationState(MyChar);
+          } }, AnimationEndDelay, false);
+        GetWorldTimerManager().SetTimer(MiddleHandle, [this, MyChar]()
+                                        {
+          if (IsValid(MyChar))
+          {
+              ClearThrowMiddleWindow(MyChar);
+          } }, InputLockEndDelay, false);
 
-                    ActorToThrow->OnThrown(ReleaseCameraRotation.Vector(), Force);
-                    ActorToThrow->OnThrown(BuildReleaseThrowDirection(ActorToThrow, ReleaseCameraLocation, ReleaseCameraRotation), Force);
+        GetWorldTimerManager().SetTimer(ThrowHandle, [this, MyChar, ActorToThrow, Force, BuildReleaseThrowDirection]()
+                                        {
+          if (IsValid(MyChar) && IsValid(ActorToThrow))
+          {
+              if (HeldActor == ActorToThrow)
+              {
+                  HeldActor = nullptr;
+                  ApplySprintAnimationState(MyChar);
+              }
 
-                } }, ReleaseDelay, false);
+              FVector ReleaseCameraLocation = FVector::ZeroVector;
+              FRotator ReleaseCameraRotation = FRotator::ZeroRotator;
+              GetPlayerViewPoint(ReleaseCameraLocation, ReleaseCameraRotation);
+
+              ActorToThrow->OnThrown(BuildReleaseThrowDirection(ActorToThrow, ReleaseCameraLocation, ReleaseCameraRotation), Force);
+          } }, ReleaseDelay, false);
     }
     else
     {
@@ -1341,25 +1351,34 @@ void AMyPlayerController::ThrowHeldActor()
         FTimerHandle ThrowHandle;
 
         GetWorldTimerManager().SetTimer(StandHandle, [this, MyChar]()
-                                        { FinishThrowAnimationState(MyChar); }, AnimationEndDelay, false);
-        GetWorldTimerManager().SetTimer(MiddleHandle, [this, MyChar]()
-                                        { ClearThrowMiddleWindow(MyChar); }, InputLockEndDelay, false);
-        GetWorldTimerManager().SetTimer(ThrowHandle, [this, MyChar, ActorToThrow, Force, &BuildReleaseThrowDirection]()
                                         {
-                if (MyChar && ActorToThrow)
-                {
+         if (IsValid(MyChar))
+         {
+             FinishThrowAnimationState(MyChar);
+         } }, AnimationEndDelay, false);
+        GetWorldTimerManager().SetTimer(MiddleHandle, [this, MyChar]()
+                                        {
+         if (IsValid(MyChar))
+         {
+             ClearThrowMiddleWindow(MyChar);
+         } }, InputLockEndDelay, false);
 
-                    if (HeldActor == ActorToThrow)
-                    {
-                        HeldActor = nullptr;
-                        ApplySprintAnimationState(MyChar);
-                    }
-                    FVector ReleaseCameraLocation = FVector::ZeroVector;
-                    FRotator ReleaseCameraRotation = FRotator::ZeroRotator;
-                    GetPlayerViewPoint(ReleaseCameraLocation, ReleaseCameraRotation);
+        GetWorldTimerManager().SetTimer(ThrowHandle, [this, MyChar, ActorToThrow, Force, BuildReleaseThrowDirection]()
+                                        {
+         if (IsValid(MyChar) && IsValid(ActorToThrow))
+         {
+             if (HeldActor == ActorToThrow)
+             {
+                 HeldActor = nullptr;
+                 ApplySprintAnimationState(MyChar);
+             }
 
-                    ActorToThrow->OnThrown(BuildReleaseThrowDirection(ActorToThrow, ReleaseCameraLocation, ReleaseCameraRotation), Force);
-                } }, ReleaseDelay, false);
+             FVector ReleaseCameraLocation = FVector::ZeroVector;
+             FRotator ReleaseCameraRotation = FRotator::ZeroRotator;
+             GetPlayerViewPoint(ReleaseCameraLocation, ReleaseCameraRotation);
+
+             ActorToThrow->OnThrown(BuildReleaseThrowDirection(ActorToThrow, ReleaseCameraLocation, ReleaseCameraRotation), Force);
+         } }, ReleaseDelay, false);
     }
 }
 
@@ -1431,14 +1450,12 @@ void AMyPlayerController::StartThrowAnimationState(AWomenCharacter *MyChar) cons
     MyChar->IsSquatThrowing = false;
 }
 
-
-bool AMyPlayerController::IsThrowStateActive(const AWomenCharacter* MyChar) const
+bool AMyPlayerController::IsThrowStateActive(const AWomenCharacter *MyChar) const
 {
-    return MyChar
-        && (MyChar->IsMiddleHandleTime || MyChar->IsSquatThrowing || MyChar->IsStandThrowing);
+    return MyChar && (MyChar->IsMiddleHandleTime || MyChar->IsSquatThrowing || MyChar->IsStandThrowing);
 }
 
-void AMyPlayerController::ApplySprintAnimationState(AWomenCharacter* MyChar)
+void AMyPlayerController::ApplySprintAnimationState(AWomenCharacter *MyChar)
 {
     if (!MyChar)
     {
@@ -1453,8 +1470,6 @@ void AMyPlayerController::ApplySprintAnimationState(AWomenCharacter* MyChar)
         ServerSetSprintState(bWantsToSprint);
     }
 }
-
-
 
 void AMyPlayerController::FinishThrowAnimationState(AWomenCharacter *MyChar) const
 {

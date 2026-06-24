@@ -13,6 +13,7 @@
 #include "MyAIController.h"
 #include "PickupActor.h"
 #include "PickupActorAAARuneInstrument.h"
+#include "PickupActorAAARuneDisableCard.h"
 #include "PickupActorAAASlowTalisman.h"
 #include "WomenCharacter.h"
 
@@ -522,7 +523,18 @@ void AGhostCharacter::HandleGhostAttachZoneBeginOverlap(
     }
 
     AMyAIController *AIController = ResolveMyAIController();
-    if (!IsValid(AIController) || !AIController->IsGhostRevealedByEffect())
+    if (!IsValid(AIController))
+    {
+        return;
+    }
+
+    if (APickupActorAAARuneDisableCard *DisableCard = Cast<APickupActorAAARuneDisableCard>(OtherActor))
+    {
+        DisableCard->TryAttachToGhostZone(this, AIController, GhostAttachZoneComponent);
+        return;
+    }
+
+    if (!AIController->IsGhostRevealedByEffect())
     {
         return;
     }
