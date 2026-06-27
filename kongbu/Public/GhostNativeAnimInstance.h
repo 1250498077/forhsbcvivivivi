@@ -63,6 +63,9 @@ public:
     bool PlaySoulSuckAction();
 
     UFUNCTION(BlueprintCallable, Category = "Ghost Animation|Action")
+    void StopSoulSuckAction();
+
+    UFUNCTION(BlueprintCallable, Category = "Ghost Animation|Action")
     bool PlayKnockdownAction();
 
     UFUNCTION(BlueprintPure, Category = "Ghost Animation|Action")
@@ -77,6 +80,7 @@ protected:
     bool PlayLocomotionAnimation(const AGhostCharacter* GhostOwner, EGhostNativeLocomotionState LocomotionState);
     bool PlayAction(UAnimSequenceBase* Animation, UAnimMontage* Montage, FName SlotName, float BlendInTime, float BlendOutTime, float LockDuration);
     void StartActionLock(float LockDuration);
+    void StopAction(float BlendOutTime);
 
 private:
     UPROPERTY(Transient)

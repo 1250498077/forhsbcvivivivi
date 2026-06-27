@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "TimerManager.h"
 #include "ConfigurableDoorActor.generated.h"
 
 class UCurveFloat;
@@ -38,6 +39,7 @@ protected:
 
     void ApplyDoorStateInstant(bool bOpenState);
     void StartDoorAnimation(bool bOpenState);
+    void ConfigureDoorMeshBlocking();
     float EvaluateAnimationAlpha(float NormalizedAlpha) const;
     FTransform GetClosedDoorTransform() const;
     FTransform GetOpenedDoorTransform() const;
@@ -56,6 +58,9 @@ protected:
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     TObjectPtr<UStaticMeshComponent> DoorMeshComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    TObjectPtr<UBoxComponent> DoorBlockerComponent;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     TObjectPtr<UBoxComponent> InteractionRangeComponent;
@@ -86,6 +91,9 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Door|Interaction", meta = (ClampMin = "-1.0", ClampMax = "1.0"))
     float InteractionFacingDotThreshold = 0.35f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Door|Collision")
+    FVector DoorBlockerExtent = FVector(12.f, 60.f, 110.f);
+
     // --- Door | Setup ---
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Door|Setup")
@@ -104,6 +112,9 @@ protected:
 
     UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Door|State")
     bool bIsAnimating = false;
+
+    UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Door|State")
+    bool bIsLockedClosed = false;
 
     // --- Transient Properties (Runtime Only) ---
 
@@ -125,6 +136,8 @@ protected:
     UPROPERTY(Transient)
     FQuat AnimationTargetRotation = FQuat::Identity;
 
+    FTimerHandle DoorLockTimerHandle;
+
 public:
     // --- Public API Functions ---
 
@@ -140,6 +153,12 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Door")
     void SetDoorOpenState(bool bNewOpenState, bool bInstant = false);
 
+    UFUNCTION(BlueprintCallable, Category = "Door|Lock")
+    void LockDoorClosedForDuration(float Duration);
+
+    UFUNCTION(BlueprintCallable, Category = "Door|Lock")
+    void UnlockDoor();
+
     UFUNCTION(BlueprintPure, Category = "Door")
     bool IsDoorOpen() const
     {
@@ -150,6 +169,12 @@ public:
     bool IsDoorAnimating() const
     {
         return bIsAnimating;
+    }
+
+    UFUNCTION(BlueprintPure, Category = "Door|Lock")
+    bool IsDoorLockedClosed() const
+    {
+        return bIsLockedClosed;
     }
 
     UFUNCTION(BlueprintPure, Category = "Door|Components")

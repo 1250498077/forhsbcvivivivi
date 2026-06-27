@@ -14,6 +14,8 @@
 #include "PickupActor.h"
 #include "PickupActorAAARuneInstrument.h"
 #include "PickupActorAAARuneDisableCard.h"
+#include "PickupActorAAARuneRevealCard.h"
+#include "PickupActorAAARuneslowCard.h"
 #include "PickupActorAAASlowTalisman.h"
 #include "WomenCharacter.h"
 
@@ -22,7 +24,7 @@ AGhostCharacter::AGhostCharacter()
     PrimaryActorTick.bCanEverTick = true;
 
     bUseControllerRotationYaw = false;
-    if (UCharacterMovementComponent* MovementComponent = GetCharacterMovement())
+    if (UCharacterMovementComponent *MovementComponent = GetCharacterMovement())
     {
         MovementComponent->bOrientRotationToMovement = true;
         MovementComponent->bUseControllerDesiredRotation = false;
@@ -101,6 +103,16 @@ void AGhostCharacter::Tick(float DeltaTime)
         UpdateTelekineticThrowableThrow(DeltaTime);
     }
 
+    if (bIsSoulSucking)
+    {
+        UpdateSoulSuckVictimLift(DeltaTime);
+    }
+
+    if (bIsSoulSuckBreakRecoveryActive)
+    {
+        UpdateSoulSuckBreakRecovery(DeltaTime);
+    }
+
     if (bShowGhostAttachZoneDebug && GhostAttachZoneComponent)
     {
         DrawDebugCapsule(
@@ -165,12 +177,12 @@ UCapsuleComponent *AGhostCharacter::GetGhostAttachZoneComponent() const
 {
     return GhostAttachZoneComponent;
 }
-UCapsuleComponent* AGhostCharacter::GetSoulSuckTriggerComponent() const
+UCapsuleComponent *AGhostCharacter::GetSoulSuckTriggerComponent() const
 {
     return SoulSuckTriggerComponent;
 }
 
-UCapsuleComponent* AGhostCharacter::GetTelekinesisTriggerComponent() const
+UCapsuleComponent *AGhostCharacter::GetTelekinesisTriggerComponent() const
 {
     return TelekinesisTriggerComponent;
 }
@@ -189,9 +201,9 @@ bool AGhostCharacter::IsWorldLocationInsideGhostAttachZone(const FVector &WorldL
 }
 bool AGhostCharacter::PlayGhostOpenDoorAnimation()
 {
-    if (USkeletalMeshComponent* MeshComponent = GetMesh())
+    if (USkeletalMeshComponent *MeshComponent = GetMesh())
     {
-        if (UGhostNativeAnimInstance* GhostAnimInstance = Cast<UGhostNativeAnimInstance>(MeshComponent->GetAnimInstance()))
+        if (UGhostNativeAnimInstance *GhostAnimInstance = Cast<UGhostNativeAnimInstance>(MeshComponent->GetAnimInstance()))
         {
             return GhostAnimInstance->PlayOpenDoorAction();
         }
@@ -200,38 +212,30 @@ bool AGhostCharacter::PlayGhostOpenDoorAnimation()
     return false;
 }
 
-bool AGhostCharacter::StartSoulSuck(AWomenCharacter* Victim)
+bool AGhostCharacter::StartSoulSuck(AWomenCharacter *Victim)
 {
-    if (!bEnableSoulSuckOnPlayerTouch || bIsSoulSucking || !IsValid(Victim))
+    if (!bEnableSoulSuckOnPlayerTouch || bIsSoulSucking || bIsSoulSuckBreakRecoveryActive || !IsValid(Victim))
     {
         return false;
     }
 
     bIsSoulSucking = true;
     CurrentSoulSuckVictim = Victim;
+    SoulSuckVictimStartLocation = Victim->GetActorLocation();
+    SoulSuckVictimTargetLocation = SoulSuckVictimStartLocation + FVector(0.f, 0.f, FMath::Max(0.f, SoulSuckLiftHeight));
 
     if (bStopAIMovementDuringSoulSuck)
     {
-        if (AAIController* AIController = Cast<AAIController>(GetController()))
+        if (AAIController *AIController = Cast<AAIController>(GetController()))
         {
             AIController->StopMovement();
         }
     }
+    OrientSoulSuckVictimTowardGhost(Victim);
 
     FreezeSoulSuckVictim(Victim);
-    Victim->StartSoulSuckReaction();
+    Victim->StartSoulSuckReaction(this);
     MulticastPlayGhostSoulSuckAnimation();
-
-    const float ResolvedDuration = ResolveSoulSuckDuration();
-
-    if (ResolvedDuration > 0.f)
-    {
-        GetWorldTimerManager().SetTimer(SoulSuckTimerHandle, this, &AGhostCharacter::StopSoulSuck, ResolvedDuration, false);
-    }
-    else
-    {
-        GetWorldTimerManager().SetTimerForNextTick(this, &AGhostCharacter::StopSoulSuck);
-    }
 
     return true;
 }
@@ -240,9 +244,14 @@ void AGhostCharacter::StopSoulSuck()
 {
     GetWorldTimerManager().ClearTimer(SoulSuckTimerHandle);
 
-    AWomenCharacter* Victim = CurrentSoulSuckVictim;
+    AWomenCharacter *Victim = CurrentSoulSuckVictim;
     bIsSoulSucking = false;
     CurrentSoulSuckVictim = nullptr;
+
+    SoulSuckVictimStartLocation = FVector::ZeroVector;
+    SoulSuckVictimTargetLocation = FVector::ZeroVector;
+
+    MulticastStopGhostSoulSuckAnimation();
 
     UnfreezeSoulSuckVictim(Victim);
     if (IsValid(Victim) && Victim->bIsSoulSucked)
@@ -251,14 +260,14 @@ void AGhostCharacter::StopSoulSuck()
     }
 }
 
-bool AGhostCharacter::InterruptSoulSuckWithKnockdown(AActor* ImpactSourceActor, FVector ImpactDirection, float StunDuration)
+bool AGhostCharacter::InterruptSoulSuckWithKnockdown(AActor *ImpactSourceActor, FVector ImpactDirection, float StunDuration)
 {
     if (!bIsSoulSucking)
     {
         return false;
     }
 
-    AWomenCharacter* Victim = CurrentSoulSuckVictim;
+    AWomenCharacter *Victim = CurrentSoulSuckVictim;
     StopSoulSuck();
 
     FVector FacingDirection = FVector::ZeroVector;
@@ -277,7 +286,7 @@ bool AGhostCharacter::InterruptSoulSuckWithKnockdown(AActor* ImpactSourceActor, 
         const FRotator KnockdownRotation = FacingDirection.Rotation();
         SetActorRotation(FRotator(0.f, KnockdownRotation.Yaw, 0.f));
 
-        if (AController* MyController = GetController())
+        if (AController *MyController = GetController())
         {
             MyController->SetControlRotation(FRotator(0.f, KnockdownRotation.Yaw, 0.f));
         }
@@ -291,7 +300,7 @@ bool AGhostCharacter::InterruptSoulSuckWithKnockdown(AActor* ImpactSourceActor, 
     MulticastPlayGhostKnockdownAnimation();
 
     const float ResolvedStunDuration = StunDuration > 0.f ? StunDuration : ResolveGhostKnockdownDuration();
-    if (AMyAIController* AIController = ResolveMyAIController())
+    if (AMyAIController *AIController = ResolveMyAIController())
     {
         AIController->ApplyStunFromSource(ResolvedStunDuration, ImpactSourceActor);
     }
@@ -299,13 +308,9 @@ bool AGhostCharacter::InterruptSoulSuckWithKnockdown(AActor* ImpactSourceActor, 
     return true;
 }
 
-bool AGhostCharacter::StartTelekineticThrowableThrow(UGhostThrowablePropComponent* ThrowableProp)
+bool AGhostCharacter::StartTelekineticThrowableThrow(UGhostThrowablePropComponent *ThrowableProp)
 {
-    if (!bEnableTelekineticThrowableThrow
-        || bIsTelekineticThrowActive
-        || bIsSoulSucking
-        || !IsValid(ThrowableProp)
-        || !ThrowableProp->CanBeUsedByGhost())
+    if (!bEnableTelekineticThrowableThrow || bIsTelekineticThrowActive || bIsSoulSucking || !IsValid(ThrowableProp) || !ThrowableProp->CanBeUsedByGhost())
     {
         return false;
     }
@@ -337,7 +342,7 @@ bool AGhostCharacter::StartTelekineticThrowableThrow(UGhostThrowablePropComponen
 
 void AGhostCharacter::StopTelekineticThrowableThrow(bool bLaunchThrowable)
 {
-    UGhostThrowablePropComponent* ThrowableProp = CurrentTelekineticThrowable;
+    UGhostThrowablePropComponent *ThrowableProp = CurrentTelekineticThrowable;
     CurrentTelekineticThrowable = nullptr;
     CurrentTelekineticTargetActor = nullptr;
     TelekineticElapsedTime = 0.f;
@@ -362,7 +367,7 @@ void AGhostCharacter::StopTelekineticThrowableThrow(bool bLaunchThrowable)
 
         ThrowableProp->LaunchFromGhostTelekinesis(ThrowDirection.GetSafeNormal(), TelekineticThrowForce, this);
 
-        if (AMyAIController* AIController = ResolveMyAIController())
+        if (AMyAIController *AIController = ResolveMyAIController())
         {
             if (!AIController->CanCurrentlySeePlayer())
             {
@@ -375,6 +380,92 @@ void AGhostCharacter::StopTelekineticThrowableThrow(bool bLaunchThrowable)
         ThrowableProp->CancelGhostTelekinesis();
     }
 }
+
+void AGhostCharacter::ApplyTemporaryMoveSpeedMultiplier(float SpeedMultiplier, float Duration)
+{
+    UCharacterMovementComponent* MovementComponent = GetCharacterMovement();
+    if (!MovementComponent || SpeedMultiplier <= 0.f || Duration <= 0.f)
+    {
+        return;
+    }
+
+    if (!bHasCachedMoveSpeedBeforeTemporaryMultiplier)
+    {
+        CachedMoveSpeedBeforeTemporaryMultiplier = MovementComponent->MaxWalkSpeed;
+        bHasCachedMoveSpeedBeforeTemporaryMultiplier = true;
+    }
+
+    MovementComponent->MaxWalkSpeed = FMath::Max(MovementComponent->MaxWalkSpeed, CachedMoveSpeedBeforeTemporaryMultiplier * SpeedMultiplier);
+
+    GetWorldTimerManager().ClearTimer(TemporaryMoveSpeedMultiplierTimerHandle);
+    GetWorldTimerManager().SetTimer(
+        TemporaryMoveSpeedMultiplierTimerHandle,
+        this,
+        &AGhostCharacter::RestoreTemporaryMoveSpeedMultiplier,
+        Duration,
+        false);
+}
+
+void AGhostCharacter::RestoreTemporaryMoveSpeedMultiplier()
+{
+    if (bHasCachedMoveSpeedBeforeTemporaryMultiplier)
+    {
+        if (UCharacterMovementComponent* MovementComponent = GetCharacterMovement())
+        {
+            MovementComponent->MaxWalkSpeed = CachedMoveSpeedBeforeTemporaryMultiplier;
+        }
+    }
+
+    bHasCachedMoveSpeedBeforeTemporaryMultiplier = false;
+    CachedMoveSpeedBeforeTemporaryMultiplier = 0.f;
+    GetWorldTimerManager().ClearTimer(TemporaryMoveSpeedMultiplierTimerHandle);
+}
+
+void AGhostCharacter::StopSoulSuckAfterVictimEscape()
+{
+    if (bIsSoulSucking)
+    {
+        StopSoulSuck();
+    }
+
+    StartSoulSuckBreakRecovery();
+}
+
+bool AGhostCharacter::IsSoulSuckBreakRecoveryActive() const
+{
+    return bIsSoulSuckBreakRecoveryActive;
+}
+
+void AGhostCharacter::StartSoulSuckBreakRecovery()
+{
+    const float RecoveryDuration = FMath::Max(0.f, SoulSuckBreakRecoveryDuration);
+    if (RecoveryDuration <= 0.f)
+    {
+        bIsSoulSuckBreakRecoveryActive = false;
+        SoulSuckBreakRecoveryTimeRemaining = 0.f;
+        return;
+    }
+
+    bIsSoulSuckBreakRecoveryActive = true;
+    SoulSuckBreakRecoveryTimeRemaining = RecoveryDuration;
+
+    if (AMyAIController* AIController = ResolveMyAIController())
+    {
+        AIController->BeginSoulSuckBreakRecoveryPause();
+    }
+}
+
+void AGhostCharacter::UpdateSoulSuckBreakRecovery(float DeltaTime)
+{
+    // 注意：此处代码在截图中被截断，根据逻辑补全
+    SoulSuckBreakRecoveryTimeRemaining = FMath::Max(0.f, SoulSuckBreakRecoveryTimeRemaining - DeltaTime);
+    if (SoulSuckBreakRecoveryTimeRemaining <= 0.f)
+    {
+        bIsSoulSuckBreakRecoveryActive = false;
+    }
+}
+
+
 void AGhostCharacter::ConfigureGhostAttachZoneCollision() const
 {
     if (!GhostAttachZoneComponent)
@@ -454,7 +545,7 @@ void AGhostCharacter::UpdateTelekinesisTriggerDebugVisibility() const
 
 void AGhostCharacter::ApplyGhostTurnSettings() const
 {
-    UCharacterMovementComponent* MovementComponent = GetCharacterMovement();
+    UCharacterMovementComponent *MovementComponent = GetCharacterMovement();
     if (!MovementComponent || !bEnableGhostTurnSmoothing)
     {
         return;
@@ -465,44 +556,89 @@ void AGhostCharacter::ApplyGhostTurnSettings() const
     MovementComponent->RotationRate = FRotator(0.f, GhostBodyRotationRateYaw, 0.f);
 }
 
-void AGhostCharacter::FreezeSoulSuckVictim(AWomenCharacter* Victim) const
+void AGhostCharacter::OrientSoulSuckVictimTowardGhost(AWomenCharacter* Victim) const
+{
+    if (!IsValid(Victim))
+    {
+        return;
+    }
+
+    FVector DirectionToGhost = GetActorLocation() - Victim->GetActorLocation();
+    DirectionToGhost.Z = 0.f;
+    if (DirectionToGhost.IsNearlyZero())
+    {
+        return;
+    }
+
+    const FRotator TargetRotation(0.f, DirectionToGhost.Rotation().Yaw, 0.f);
+    Victim->SetActorRotation(TargetRotation);
+
+    if (AController* VictimController = Victim->GetController())
+    {
+        VictimController->SetControlRotation(TargetRotation);
+    }
+}
+
+void AGhostCharacter::FreezeSoulSuckVictim(AWomenCharacter *Victim) const
 {
     if (!bFreezeVictimDuringSoulSuck || !IsValid(Victim))
     {
         return;
     }
 
-    if (UCharacterMovementComponent* MovementComponent = Victim->GetCharacterMovement())
+    if (UCharacterMovementComponent *MovementComponent = Victim->GetCharacterMovement())
     {
         MovementComponent->StopMovementImmediately();
         MovementComponent->DisableMovement();
     }
 
-    if (AController* VictimController = Victim->GetController())
+    if (AController *VictimController = Victim->GetController())
     {
         VictimController->SetIgnoreMoveInput(true);
         VictimController->SetIgnoreLookInput(true);
     }
 }
 
-void AGhostCharacter::UnfreezeSoulSuckVictim(AWomenCharacter* Victim) const
+void AGhostCharacter::UnfreezeSoulSuckVictim(AWomenCharacter *Victim) const
 {
     if (!bFreezeVictimDuringSoulSuck || !IsValid(Victim))
     {
         return;
     }
 
-    if (UCharacterMovementComponent* MovementComponent = Victim->GetCharacterMovement())
+    if (UCharacterMovementComponent *MovementComponent = Victim->GetCharacterMovement())
     {
         MovementComponent->SetMovementMode(MOVE_Walking);
     }
 
-    if (AController* VictimController = Victim->GetController())
+    if (AController *VictimController = Victim->GetController())
     {
         VictimController->SetIgnoreMoveInput(false);
         VictimController->SetIgnoreLookInput(false);
     }
 }
+
+void AGhostCharacter::UpdateSoulSuckVictimLift(float DeltaTime)
+{
+    AWomenCharacter *Victim = CurrentSoulSuckVictim;
+    if (!IsValid(Victim))
+    {
+        StopSoulSuck();
+        return;
+    }
+
+    const FVector CurrentLocation = Victim->GetActorLocation();
+    const FVector TargetLocation = SoulSuckVictimTargetLocation.IsNearlyZero()
+                                       ? CurrentLocation
+                                       : SoulSuckVictimTargetLocation;
+
+    const FVector NewLocation = SoulSuckLiftInterpSpeed > 0.f
+                                    ? FMath::VInterpTo(CurrentLocation, TargetLocation, DeltaTime, SoulSuckLiftInterpSpeed)
+                                    : TargetLocation;
+
+    Victim->SetActorLocation(NewLocation, false, nullptr, ETeleportType::TeleportPhysics);
+}
+
 void AGhostCharacter::HandleGhostAttachZoneBeginOverlap(
     UPrimitiveComponent *OverlappedComponent,
     AActor *OtherActor,
@@ -534,6 +670,18 @@ void AGhostCharacter::HandleGhostAttachZoneBeginOverlap(
         return;
     }
 
+    if (APickupActorAAARuneRevealCard *RevealCard = Cast<APickupActorAAARuneRevealCard>(OtherActor))
+    {
+        RevealCard->TryAttachToGhostZone(this, AIController, GhostAttachZoneComponent);
+        return;
+    }
+
+    if (APickupActorAAARuneSlowCard *SlowCard = Cast<APickupActorAAARuneSlowCard>(OtherActor))
+    {
+        SlowCard->TryAttachToGhostZone(this, AIController, GhostAttachZoneComponent);
+        return;
+    }
+
     if (!AIController->IsGhostRevealedByEffect())
     {
         return;
@@ -551,12 +699,12 @@ void AGhostCharacter::HandleGhostAttachZoneBeginOverlap(
     }
 }
 void AGhostCharacter::HandleSoulSuckTriggerBeginOverlap(
-    UPrimitiveComponent* OverlappedComponent,
-    AActor* OtherActor,
-    UPrimitiveComponent* OtherComp,
+    UPrimitiveComponent *OverlappedComponent,
+    AActor *OtherActor,
+    UPrimitiveComponent *OtherComp,
     int32 OtherBodyIndex,
     bool bFromSweep,
-    const FHitResult& SweepResult)
+    const FHitResult &SweepResult)
 {
     (void)OverlappedComponent;
     (void)OtherComp;
@@ -569,19 +717,19 @@ void AGhostCharacter::HandleSoulSuckTriggerBeginOverlap(
         return;
     }
 
-    if (AWomenCharacter* Victim = Cast<AWomenCharacter>(OtherActor))
+    if (AWomenCharacter *Victim = Cast<AWomenCharacter>(OtherActor))
     {
         StartSoulSuck(Victim);
     }
 }
 
 void AGhostCharacter::HandleTelekinesisTriggerBeginOverlap(
-    UPrimitiveComponent* OverlappedComponent,
-    AActor* OtherActor,
-    UPrimitiveComponent* OtherComp,
+    UPrimitiveComponent *OverlappedComponent,
+    AActor *OtherActor,
+    UPrimitiveComponent *OtherComp,
     int32 OtherBodyIndex,
     bool bFromSweep,
-    const FHitResult& SweepResult)
+    const FHitResult &SweepResult)
 {
     (void)OverlappedComponent;
     (void)OtherComp;
@@ -594,7 +742,7 @@ void AGhostCharacter::HandleTelekinesisTriggerBeginOverlap(
         return;
     }
 
-    if (UGhostThrowablePropComponent* ThrowableProp = OtherActor->FindComponentByClass<UGhostThrowablePropComponent>())
+    if (UGhostThrowablePropComponent *ThrowableProp = OtherActor->FindComponentByClass<UGhostThrowablePropComponent>())
     {
         StartTelekineticThrowableThrow(ThrowableProp);
     }
@@ -602,9 +750,9 @@ void AGhostCharacter::HandleTelekinesisTriggerBeginOverlap(
 
 void AGhostCharacter::MulticastPlayGhostKnockdownAnimation_Implementation()
 {
-    if (USkeletalMeshComponent* MeshComponent = GetMesh())
+    if (USkeletalMeshComponent *MeshComponent = GetMesh())
     {
-        if (UGhostNativeAnimInstance* GhostAnimInstance = Cast<UGhostNativeAnimInstance>(MeshComponent->GetAnimInstance()))
+        if (UGhostNativeAnimInstance *GhostAnimInstance = Cast<UGhostNativeAnimInstance>(MeshComponent->GetAnimInstance()))
         {
             GhostAnimInstance->PlayKnockdownAction();
         }
@@ -613,11 +761,22 @@ void AGhostCharacter::MulticastPlayGhostKnockdownAnimation_Implementation()
 
 void AGhostCharacter::MulticastPlayGhostSoulSuckAnimation_Implementation()
 {
-    if (USkeletalMeshComponent* MeshComponent = GetMesh())
+    if (USkeletalMeshComponent *MeshComponent = GetMesh())
     {
-        if (UGhostNativeAnimInstance* GhostAnimInstance = Cast<UGhostNativeAnimInstance>(MeshComponent->GetAnimInstance()))
+        if (UGhostNativeAnimInstance *GhostAnimInstance = Cast<UGhostNativeAnimInstance>(MeshComponent->GetAnimInstance()))
         {
             GhostAnimInstance->PlaySoulSuckAction();
+        }
+    }
+}
+
+void AGhostCharacter::MulticastStopGhostSoulSuckAnimation_Implementation()
+{
+    if (USkeletalMeshComponent *MeshComponent = GetMesh())
+    {
+        if (UGhostNativeAnimInstance *GhostAnimInstance = Cast<UGhostNativeAnimInstance>(MeshComponent->GetAnimInstance()))
+        {
+            GhostAnimInstance->StopSoulSuckAction();
         }
     }
 }
@@ -652,27 +811,27 @@ float AGhostCharacter::ResolveGhostKnockdownDuration() const
     return ResolvedDuration;
 }
 
-AActor* AGhostCharacter::ResolveTelekineticTargetActor() const
+AActor *AGhostCharacter::ResolveTelekineticTargetActor() const
 {
-    if (const AMyAIController* AIController = ResolveMyAIController())
+    if (const AMyAIController *AIController = ResolveMyAIController())
     {
-        if (AActor* TrackedTarget = AIController->GetCurrentTargetPlayer())
+        if (AActor *TrackedTarget = AIController->GetCurrentTargetPlayer())
         {
             return TrackedTarget;
         }
     }
 
-    UWorld* World = GetWorld();
+    UWorld *World = GetWorld();
     if (!World)
     {
         return nullptr;
     }
 
-    AActor* BestTarget = nullptr;
+    AActor *BestTarget = nullptr;
     float BestDistanceSq = TNumericLimits<float>::Max();
     for (TActorIterator<AWomenCharacter> It(World); It; ++It)
     {
-        AWomenCharacter* Candidate = *It;
+        AWomenCharacter *Candidate = *It;
         if (!IsValid(Candidate))
         {
             continue;
@@ -689,7 +848,7 @@ AActor* AGhostCharacter::ResolveTelekineticTargetActor() const
     return BestTarget;
 }
 
-bool AGhostCharacter::RefreshTelekineticTargetLocation(FVector& OutLocation)
+bool AGhostCharacter::RefreshTelekineticTargetLocation(FVector &OutLocation)
 {
     if (IsValid(CurrentTelekineticTargetActor))
     {
@@ -706,7 +865,7 @@ bool AGhostCharacter::RefreshTelekineticTargetLocation(FVector& OutLocation)
         return true;
     }
 
-    if (const AMyAIController* AIController = ResolveMyAIController())
+    if (const AMyAIController *AIController = ResolveMyAIController())
     {
         if (AIController->TryGetTrackedPlayerLocation(OutLocation))
         {

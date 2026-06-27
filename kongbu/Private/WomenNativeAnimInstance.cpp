@@ -10,7 +10,6 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "WomenCharacter.h"
 
-
 void UWomenNativeAnimInstance::NativeInitializeAnimation()
 {
     Super::NativeInitializeAnimation();
@@ -39,6 +38,7 @@ void UWomenNativeAnimInstance::NativeInitializeAnimation()
     bOneShotActionLocked = false;
     OneShotActionLockTimeRemaining = 0.f;
     ActiveThrowDynamicMontage = nullptr;
+    ActiveForcedReactionDynamicMontage = nullptr;
     bThrowUsesLoopingUpperBodySequence = false;
     bThrowUsesFullBodySlot = false;
     bNeedsLocomotionReplayAfterForcedAction = false;
@@ -80,10 +80,9 @@ void UWomenNativeAnimInstance::InitializeDefaultLookBoneRotations()
     const TArray<FName> LookBoneNames = {
         TEXT("Spine2"),
         TEXT("Neck"),
-        TEXT("Head")
-    };
+        TEXT("Head")};
 
-    const float PitchWeights[] = { 1.0f, 1.0f, 1.0f };
+    const float PitchWeights[] = {1.0f, 1.0f, 1.0f};
 
     for (int32 Index = 0; Index < LookBoneNames.Num(); ++Index)
     {
@@ -101,23 +100,23 @@ void UWomenNativeAnimInstance::InitializeDefaultLookBoneRotations()
     }
 }
 
-
 bool UWomenNativeAnimInstance::HasSkeletonBone(FName BoneName) const
 {
-    const USkeletalMeshComponent* MeshComponent = GetSkelMeshComponent();
+    const USkeletalMeshComponent *MeshComponent = GetSkelMeshComponent();
     return MeshComponent && MeshComponent->GetBoneIndex(BoneName) != INDEX_NONE;
 }
 
 void UWomenNativeAnimInstance::NativeUpdateAnimation(float DeltaTime)
 {
     Super::NativeUpdateAnimation(DeltaTime);
-    APawn* Pawn = TryGetPawnOwner();
-    if (!Pawn) return;
+    APawn *Pawn = TryGetPawnOwner();
+    if (!Pawn)
+        return;
     Speed = Pawn->GetVelocity().Size2D();
     bHasMovementInput = false;
-    if (const AWomenCharacter* WomenCharacter = Cast<AWomenCharacter>(Pawn))
+    if (const AWomenCharacter *WomenCharacter = Cast<AWomenCharacter>(Pawn))
     {
-        if (const UCharacterMovementComponent* MovementComponent = WomenCharacter->GetCharacterMovement())
+        if (const UCharacterMovementComponent *MovementComponent = WomenCharacter->GetCharacterMovement())
         {
             // 判断是否有移动输入（通过加速度大小的平方是否大于极小值来判断）
             bHasMovementInput = MovementComponent->GetCurrentAcceleration().SizeSquared2D() > KINDA_SMALL_NUMBER;
@@ -125,6 +124,13 @@ void UWomenNativeAnimInstance::NativeUpdateAnimation(float DeltaTime)
     }
 
     UpdateOneShotActionLock(DeltaTime);
+    if (const AWomenCharacter *WomenCharacter = Cast<AWomenCharacter>(Pawn))
+    {
+        if (WomenCharacter->bIsSoulSucked && ActiveForcedReactionDynamicMontage && !Montage_IsPlaying(ActiveForcedReactionDynamicMontage))
+        {
+            Montage_Play(ActiveForcedReactionDynamicMontage, 1.f);
+        }
+    }
     UpdateNativeLookBoneRotations(DeltaTime);
     UpdateHoldTypeFromOwner();
     HandleHoldTypeChanged();
@@ -153,12 +159,12 @@ void UWomenNativeAnimInstance::UpdateOneShotActionLock(float DeltaTime)
 
 void UWomenNativeAnimInstance::UpdateNativeLookBoneRotations(float DeltaTime)
 {
-    const USkeletalMeshComponent* MeshComponent = GetSkelMeshComponent();
+    const USkeletalMeshComponent *MeshComponent = GetSkelMeshComponent();
     if (!MeshComponent)
     {
         return;
     }
-    
+
     if (!bEnableNativeLookBoneCalculation)
     {
         Spine2LookRotation = FRotator::ZeroRotator;
@@ -194,21 +200,18 @@ void UWomenNativeAnimInstance::UpdateNativeLookBoneRotations(float DeltaTime)
     NeckLookRotation = FRotator(0.f, 0.f, SmoothedLookRotation.Pitch * -0.15f);
     HeadLookRotation = FRotator(0.f, 0.f, SmoothedLookRotation.Pitch * -0.1f);
 
-    for (FNativeLookBoneRotation& LookBoneRotation : LookBoneRotations)
+    for (FNativeLookBoneRotation &LookBoneRotation : LookBoneRotations)
     {
         LookBoneRotation.ComputedRotation = FRotator{
             0.f,
             SmoothedLookRotation.Yaw * LookBoneRotation.YawWeight,
-            SmoothedLookRotation.Pitch * -LookBoneRotation.PitchWeight
-            + SmoothedLookRotation.Roll * LookBoneRotation.RollWeight
-        };
+            SmoothedLookRotation.Pitch * -LookBoneRotation.PitchWeight + SmoothedLookRotation.Roll * LookBoneRotation.RollWeight};
     }
 }
 
-
 FRotator UWomenNativeAnimInstance::CalculateControlRotationDelta() const
 {
-    const APawn* PawnOwner = TryGetPawnOwner();
+    const APawn *PawnOwner = TryGetPawnOwner();
     if (!PawnOwner)
     {
         return FRotator::ZeroRotator;
@@ -265,8 +268,7 @@ void UWomenNativeAnimInstance::UpdateLocomotionState(float DeltaTime)
         JumpStartTimeRemaining = FMath::Max(0.f, JumpStartTimeRemaining - DeltaTime);
     }
 
-    const bool bFirstPersonHoldingItem = IsFirstPersonAnimationInstance()
-    && (CurrentHeldActor || CurrentHoldType != EHoldItemType::None);
+    const bool bFirstPersonHoldingItem = IsFirstPersonAnimationInstance() && (CurrentHeldActor || CurrentHoldType != EHoldItemType::None);
 
     if (FirstPersonHeldWalkReentryTimeRemaining > 0.f)
     {
@@ -300,8 +302,8 @@ EWomenNativeLocomotionState UWomenNativeAnimInstance::ResolveLocomotionState() c
     if (bIsInAir)
     {
         return JumpStartTimeRemaining > 0.f
-            ? EWomenNativeLocomotionState::JumpStart
-            : EWomenNativeLocomotionState::FallLoop;
+                   ? EWomenNativeLocomotionState::JumpStart
+                   : EWomenNativeLocomotionState::FallLoop;
     }
 
     if (bPendingCrouchEnter)
@@ -315,11 +317,8 @@ EWomenNativeLocomotionState UWomenNativeAnimInstance::ResolveLocomotionState() c
     }
 
     bool bMoving = Speed > MoveSpeedThreshold;
-    const bool bFirstPersonHoldingItem = IsFirstPersonAnimationInstance()
-        && (CurrentHeldActor || CurrentHoldType != EHoldItemType::None);
-    if (bMoving && bFirstPersonHoldingItem && (!bHasMovementInput
-    || FirstPersonHeldMovingTime < FirstPersonHeldMovementStartDelay
-    || FirstPersonHeldWalkReentryTimeRemaining > 0.f))
+    const bool bFirstPersonHoldingItem = IsFirstPersonAnimationInstance() && (CurrentHeldActor || CurrentHoldType != EHoldItemType::None);
+    if (bMoving && bFirstPersonHoldingItem && (!bHasMovementInput || FirstPersonHeldMovingTime < FirstPersonHeldMovementStartDelay || FirstPersonHeldWalkReentryTimeRemaining > 0.f))
     {
         bMoving = false;
     }
@@ -343,8 +342,8 @@ EWomenNativeLocomotionState UWomenNativeAnimInstance::ResolveLocomotionState() c
     }
 
     return bIsSprint
-        ? EWomenNativeLocomotionState::Run
-        : EWomenNativeLocomotionState::Walk;
+               ? EWomenNativeLocomotionState::Run
+               : EWomenNativeLocomotionState::Walk;
 }
 
 void UWomenNativeAnimInstance::HandleLocomotionStateChanged()
@@ -372,20 +371,30 @@ void UWomenNativeAnimInstance::HandleLocomotionStateChanged()
     PreviousLocomotionState = CurrentLocomotionState;
 }
 
-const FNativeLocomotionAnimationSet* UWomenNativeAnimInstance::GetAnimationSetForLocomotionState(EWomenNativeLocomotionState LocomotionState) const
+const FNativeLocomotionAnimationSet *UWomenNativeAnimInstance::GetAnimationSetForLocomotionState(EWomenNativeLocomotionState LocomotionState) const
 {
     switch (LocomotionState)
     {
-        case EWomenNativeLocomotionState::Idle: return &IdleAnimation;
-        case EWomenNativeLocomotionState::Walk: return &WalkAnimation;
-        case EWomenNativeLocomotionState::Run: return &RunAnimation;
-        case EWomenNativeLocomotionState::JumpStart: return &JumpStartAnimation;
-        case EWomenNativeLocomotionState::FallLoop: return &FallLoopAnimation;
-        case EWomenNativeLocomotionState::CrouchEnter: return &CrouchEnterAnimation;
-        case EWomenNativeLocomotionState::CrouchExit: return &CrouchExitAnimation;
-        case EWomenNativeLocomotionState::CrouchIdle: return &CrouchIdleAnimation;
-        case EWomenNativeLocomotionState::CrouchWalk: return &CrouchWalkAnimation;
-        default: return nullptr;
+    case EWomenNativeLocomotionState::Idle:
+        return &IdleAnimation;
+    case EWomenNativeLocomotionState::Walk:
+        return &WalkAnimation;
+    case EWomenNativeLocomotionState::Run:
+        return &RunAnimation;
+    case EWomenNativeLocomotionState::JumpStart:
+        return &JumpStartAnimation;
+    case EWomenNativeLocomotionState::FallLoop:
+        return &FallLoopAnimation;
+    case EWomenNativeLocomotionState::CrouchEnter:
+        return &CrouchEnterAnimation;
+    case EWomenNativeLocomotionState::CrouchExit:
+        return &CrouchExitAnimation;
+    case EWomenNativeLocomotionState::CrouchIdle:
+        return &CrouchIdleAnimation;
+    case EWomenNativeLocomotionState::CrouchWalk:
+        return &CrouchWalkAnimation;
+    default:
+        return nullptr;
     }
 }
 
@@ -396,15 +405,15 @@ bool UWomenNativeAnimInstance::HasPlayableLocomotionAnimation(EWomenNativeLocomo
         return true;
     }
 
-    const FNativeLocomotionAnimationSet* AnimationSet = GetAnimationSetForLocomotionState(LocomotionState);
+    const FNativeLocomotionAnimationSet *AnimationSet = GetAnimationSetForLocomotionState(LocomotionState);
     return AnimationSet && AnimationSet->Animation;
 }
 
 bool UWomenNativeAnimInstance::PlayLocomotionAnimation(EWomenNativeLocomotionState LocomotionState)
 {
-    const FNativeLocomotionAnimationSet* AnimationSet = GetAnimationSetForLocomotionState(LocomotionState);
+    const FNativeLocomotionAnimationSet *AnimationSet = GetAnimationSetForLocomotionState(LocomotionState);
 
-    UAnimSequenceBase* Animation = GetHeldLocomotionAnimation(LocomotionState);
+    UAnimSequenceBase *Animation = GetHeldLocomotionAnimation(LocomotionState);
     if (!Animation)
     {
         Animation = AnimationSet ? AnimationSet->Animation : nullptr;
@@ -414,23 +423,19 @@ bool UWomenNativeAnimInstance::PlayLocomotionAnimation(EWomenNativeLocomotionSta
         return false;
     }
 
-    const bool bLoop = LocomotionState != EWomenNativeLocomotionState::JumpStart
-        && LocomotionState != EWomenNativeLocomotionState::CrouchEnter
-        && LocomotionState != EWomenNativeLocomotionState::CrouchExit;
+    const bool bLoop = LocomotionState != EWomenNativeLocomotionState::JumpStart && LocomotionState != EWomenNativeLocomotionState::CrouchEnter && LocomotionState != EWomenNativeLocomotionState::CrouchExit;
 
-    const bool bFirstPersonHoldingItem = IsFirstPersonAnimationInstance()
-        && (CurrentHeldActor || CurrentHoldType != EHoldItemType::None);
+    const bool bFirstPersonHoldingItem = IsFirstPersonAnimationInstance() && (CurrentHeldActor || CurrentHoldType != EHoldItemType::None);
 
-    const bool bReturningToHeldIdle = bFirstPersonHoldingItem
-        && LocomotionState == EWomenNativeLocomotionState::Idle;
+    const bool bReturningToHeldIdle = bFirstPersonHoldingItem && LocomotionState == EWomenNativeLocomotionState::Idle;
 
     const float BlendInTime = bReturningToHeldIdle
-        ? FMath::Min(LocomotionBlendInTime, FirstPersonHeldIdleBlendTime)
-        : LocomotionBlendInTime;
+                                  ? FMath::Min(LocomotionBlendInTime, FirstPersonHeldIdleBlendTime)
+                                  : LocomotionBlendInTime;
 
     const float BlendOutTime = bReturningToHeldIdle
-        ? FMath::Min(LocomotionBlendOutTime, FirstPersonHeldIdleBlendTime)
-        : LocomotionBlendOutTime;
+                                   ? FMath::Min(LocomotionBlendOutTime, FirstPersonHeldIdleBlendTime)
+                                   : LocomotionBlendOutTime;
 
     PlaySlotAnimationAsDynamicMontage(
         Animation,
@@ -467,7 +472,7 @@ bool UWomenNativeAnimInstance::CanInterruptCurrentLocomotion(EWomenNativeLocomot
     return false;
 }
 
-void UWomenNativeAnimInstance::StartAnimationLockIfNeeded(const FNativeLocomotionAnimationSet& AnimationSet)
+void UWomenNativeAnimInstance::StartAnimationLockIfNeeded(const FNativeLocomotionAnimationSet &AnimationSet)
 {
     if (AnimationSet.InterruptPolicy != EWomenNativeAnimationInterruptPolicy::MustFinish)
     {
@@ -489,9 +494,9 @@ void UWomenNativeAnimInstance::StartAnimationLockIfNeeded(const FNativeLocomotio
 void UWomenNativeAnimInstance::UpdateHoldTypeFromOwner()
 {
     EHoldItemType NewHoldType = EHoldItemType::None;
-    APickupActor* NewHeldActor = nullptr;
+    APickupActor *NewHeldActor = nullptr;
 
-    APawn* PawnOwner = TryGetPawnOwner();
+    APawn *PawnOwner = TryGetPawnOwner();
     if (!PawnOwner)
     {
         CurrentHoldType = NewHoldType;
@@ -499,9 +504,9 @@ void UWomenNativeAnimInstance::UpdateHoldTypeFromOwner()
         return;
     }
 
-    if (AMyPlayerController* PlayerController = Cast<AMyPlayerController>(PawnOwner->GetController()))
+    if (AMyPlayerController *PlayerController = Cast<AMyPlayerController>(PawnOwner->GetController()))
     {
-        if (APickupActor* HeldActor = PlayerController->GetHeldActor())
+        if (APickupActor *HeldActor = PlayerController->GetHeldActor())
         {
             NewHoldType = HeldActor->GetHoldType();
             NewHeldActor = HeldActor;
@@ -510,12 +515,12 @@ void UWomenNativeAnimInstance::UpdateHoldTypeFromOwner()
 
     if (NewHoldType == EHoldItemType::None)
     {
-        TArray<AActor*> AttachedActors;
+        TArray<AActor *> AttachedActors;
         PawnOwner->GetAttachedActors(AttachedActors);
 
-        for (AActor* AttachedActor : AttachedActors)
+        for (AActor *AttachedActor : AttachedActors)
         {
-            APickupActor* PickupActor = Cast<APickupActor>(AttachedActor);
+            APickupActor *PickupActor = Cast<APickupActor>(AttachedActor);
             if (PickupActor && PickupActor->IsHeldByPlayer())
             {
                 NewHoldType = PickupActor->GetHoldType();
@@ -529,29 +534,28 @@ void UWomenNativeAnimInstance::UpdateHoldTypeFromOwner()
     CurrentHeldActor = NewHeldActor;
 }
 
-const FPickupHeldAnimationSet* UWomenNativeAnimInstance::GetCurrentHeldAnimationSet() const
+const FPickupHeldAnimationSet *UWomenNativeAnimInstance::GetCurrentHeldAnimationSet() const
 {
-    return CurrentHeldActor 
-        ? &CurrentHeldActor->GetHeldAnimationSetForView(IsFirstPersonAnimationInstance()) 
-        : nullptr;
+    return CurrentHeldActor
+               ? &CurrentHeldActor->GetHeldAnimationSetForView(IsFirstPersonAnimationInstance())
+               : nullptr;
 }
 
 bool UWomenNativeAnimInstance::IsFirstPersonAnimationInstance() const
 {
-    const AWomenCharacter* WomenCharacter = Cast<AWomenCharacter>(TryGetPawnOwner());
-    const USkeletalMeshComponent* MeshComponent = GetSkelMeshComponent();
-    
+    const AWomenCharacter *WomenCharacter = Cast<AWomenCharacter>(TryGetPawnOwner());
+    const USkeletalMeshComponent *MeshComponent = GetSkelMeshComponent();
+
     return WomenCharacter && MeshComponent && MeshComponent == WomenCharacter->FirstPersonMesh;
 }
 
-
-UAnimSequenceBase* UWomenNativeAnimInstance::GetHeldLocomotionAnimation(EWomenNativeLocomotionState LocomotionState) const
+UAnimSequenceBase *UWomenNativeAnimInstance::GetHeldLocomotionAnimation(EWomenNativeLocomotionState LocomotionState) const
 {
-    const FPickupHeldAnimationSet* HeldAnimationSet = GetCurrentHeldAnimationSet();
-    
+    const FPickupHeldAnimationSet *HeldAnimationSet = GetCurrentHeldAnimationSet();
+
     const bool bHasHoldType = CurrentHoldType != EHoldItemType::None;
-    const FNativeHoldAnimationSet* HoldAnimationSet = bHasHoldType ? HoldAnimations.Find(CurrentHoldType) : nullptr;
-    UAnimSequenceBase* HeldIdlePose = nullptr;
+    const FNativeHoldAnimationSet *HoldAnimationSet = bHasHoldType ? HoldAnimations.Find(CurrentHoldType) : nullptr;
+    UAnimSequenceBase *HeldIdlePose = nullptr;
 
     // 尝试获取 IdlePose
     if (HeldAnimationSet && HeldAnimationSet->IdlePose)
@@ -563,45 +567,44 @@ UAnimSequenceBase* UWomenNativeAnimInstance::GetHeldLocomotionAnimation(EWomenNa
         HeldIdlePose = HoldAnimationSet->IdlePose.Get();
     }
 
-    const bool bFirstPersonHoldingItem = IsFirstPersonAnimationInstance() 
-        && (CurrentHeldActor || bHasHoldType);
+    const bool bFirstPersonHoldingItem = IsFirstPersonAnimationInstance() && (CurrentHeldActor || bHasHoldType);
 
     switch (LocomotionState)
     {
-        case EWomenNativeLocomotionState::Idle:
-            return HeldIdlePose;
-        case EWomenNativeLocomotionState::Walk:
-            if (HeldAnimationSet && HeldAnimationSet->WalkAnimation)
-            {
-                return HeldAnimationSet->WalkAnimation.Get();
-            }
-            return bFirstPersonHoldingItem ? HeldIdlePose : nullptr;
-        case EWomenNativeLocomotionState::Run:
-            if (HeldAnimationSet && HeldAnimationSet->RunAnimation)
-            {
-                return HeldAnimationSet->RunAnimation.Get();
-            }
-            return bFirstPersonHoldingItem ? HeldIdlePose : nullptr;
-        case EWomenNativeLocomotionState::CrouchIdle:
-            if (HeldAnimationSet && HeldAnimationSet->CrouchIdleAnimation)
-            {
-                return HeldAnimationSet->CrouchIdleAnimation.Get();
-            }
-            return HeldIdlePose;
-        case EWomenNativeLocomotionState::CrouchWalk:
-            if (HeldAnimationSet && HeldAnimationSet->CrouchWalkAnimation)
-            {
-                return HeldAnimationSet->CrouchWalkAnimation.Get();
-            }
-            return bFirstPersonHoldingItem ? HeldIdlePose : nullptr;
-        default:
-            return nullptr;
+    case EWomenNativeLocomotionState::Idle:
+        return HeldIdlePose;
+    case EWomenNativeLocomotionState::Walk:
+        if (HeldAnimationSet && HeldAnimationSet->WalkAnimation)
+        {
+            return HeldAnimationSet->WalkAnimation.Get();
+        }
+        return bFirstPersonHoldingItem ? HeldIdlePose : nullptr;
+    case EWomenNativeLocomotionState::Run:
+        if (HeldAnimationSet && HeldAnimationSet->RunAnimation)
+        {
+            return HeldAnimationSet->RunAnimation.Get();
+        }
+        return bFirstPersonHoldingItem ? HeldIdlePose : nullptr;
+    case EWomenNativeLocomotionState::CrouchIdle:
+        if (HeldAnimationSet && HeldAnimationSet->CrouchIdleAnimation)
+        {
+            return HeldAnimationSet->CrouchIdleAnimation.Get();
+        }
+        return HeldIdlePose;
+    case EWomenNativeLocomotionState::CrouchWalk:
+        if (HeldAnimationSet && HeldAnimationSet->CrouchWalkAnimation)
+        {
+            return HeldAnimationSet->CrouchWalkAnimation.Get();
+        }
+        return bFirstPersonHoldingItem ? HeldIdlePose : nullptr;
+    default:
+        return nullptr;
     }
 }
 
-UAnimSequenceBase* UWomenNativeAnimInstance::GetHeldThrowUpperBodyAnimation(bool bSquatThrow, bool bRunThrow) const
+UAnimSequenceBase *UWomenNativeAnimInstance::GetHeldThrowUpperBodyAnimation(bool bSquatThrow, bool bRunThrow) const
 {
-    const FPickupHeldAnimationSet* HeldAnimationSet = GetCurrentHeldAnimationSet();
+    const FPickupHeldAnimationSet *HeldAnimationSet = GetCurrentHeldAnimationSet();
     if (!HeldAnimationSet)
     {
         return nullptr;
@@ -613,13 +616,13 @@ UAnimSequenceBase* UWomenNativeAnimInstance::GetHeldThrowUpperBodyAnimation(bool
     }
 
     return bRunThrow
-        ? HeldAnimationSet->RunThrowUpperBodyAnimation.Get()
-        : HeldAnimationSet->StandThrowUpperBodyAnimation.Get();
+               ? HeldAnimationSet->RunThrowUpperBodyAnimation.Get()
+               : HeldAnimationSet->StandThrowUpperBodyAnimation.Get();
 }
 
-UAnimMontage* UWomenNativeAnimInstance::GetHeldThrowMontage(bool bSquatThrow, bool bRunThrow) const
+UAnimMontage *UWomenNativeAnimInstance::GetHeldThrowMontage(bool bSquatThrow, bool bRunThrow) const
 {
-    const FPickupHeldAnimationSet* HeldAnimationSet = GetCurrentHeldAnimationSet();
+    const FPickupHeldAnimationSet *HeldAnimationSet = GetCurrentHeldAnimationSet();
     if (!HeldAnimationSet)
     {
         return nullptr;
@@ -631,8 +634,8 @@ UAnimMontage* UWomenNativeAnimInstance::GetHeldThrowMontage(bool bSquatThrow, bo
     }
 
     return bRunThrow
-        ? HeldAnimationSet->RunThrowMontage.Get()
-        : HeldAnimationSet->StandThrowMontage.Get();
+               ? HeldAnimationSet->RunThrowMontage.Get()
+               : HeldAnimationSet->StandThrowMontage.Get();
 }
 
 void UWomenNativeAnimInstance::HandleHoldTypeChanged()
@@ -642,11 +645,12 @@ void UWomenNativeAnimInstance::HandleHoldTypeChanged()
         return;
     }
 
-    const FPickupHeldAnimationSet* HeldAnimationSet = GetCurrentHeldAnimationSet();
-    const FNativeHoldAnimationSet* AnimationSet = HoldAnimations.Find(CurrentHoldType);
+    const FPickupHeldAnimationSet *HeldAnimationSet = GetCurrentHeldAnimationSet();
+    const FNativeHoldAnimationSet *AnimationSet = HoldAnimations.Find(CurrentHoldType);
     CurrentIdlePose = HeldAnimationSet && HeldAnimationSet->IdlePose
-                      ? HeldAnimationSet->IdlePose.Get()
-                      : AnimationSet && AnimationSet->IdlePose ? AnimationSet->IdlePose.Get() : nullptr;
+                          ? HeldAnimationSet->IdlePose.Get()
+                      : AnimationSet && AnimationSet->IdlePose ? AnimationSet->IdlePose.Get()
+                                                               : nullptr;
 
     if (CurrentHeldActor || CurrentHoldType != EHoldItemType::None)
     {
@@ -682,7 +686,7 @@ void UWomenNativeAnimInstance::HandleThrowMontageState()
     {
         StopThrowAction();
     }
-    
+
     bWasStandThrowing = bIsStandThrowing;
     bWasSquatThrowing = bIsSquatThrowing;
 }
@@ -697,10 +701,10 @@ bool UWomenNativeAnimInstance::PlayThrowAction(bool bSquatThrow)
     StopThrowAction();
 
     const bool bRunThrow = !bSquatThrow && IsRunningThrow();
-    const FPickupHeldAnimationSet* HeldAnimationSet = GetCurrentHeldAnimationSet();
+    const FPickupHeldAnimationSet *HeldAnimationSet = GetCurrentHeldAnimationSet();
     const bool bFallbackToDefaultThrowAnimation = !HeldAnimationSet || HeldAnimationSet->bFallbackToDefaultThrowAnimationWhenUnset;
 
-    UAnimSequenceBase* UpperBodyAnimation = GetHeldThrowUpperBodyAnimation(bSquatThrow, bRunThrow);
+    UAnimSequenceBase *UpperBodyAnimation = GetHeldThrowUpperBodyAnimation(bSquatThrow, bRunThrow);
     if (bFallbackToDefaultThrowAnimation && bSquatThrow)
     {
         UpperBodyAnimation = UpperBodyAnimation ? UpperBodyAnimation : SquatThrowUpperBodyAnimation.Get();
@@ -740,7 +744,6 @@ bool UWomenNativeAnimInstance::PlayThrowAction(bool bSquatThrow)
             }
         }
 
-
         if (bLoopThrowUpperBodySequenceUntilThrowEnds && !UpperBodySlotName.IsNone())
         {
             ActiveThrowDynamicMontage = PlaySlotAnimationAsDynamicMontage(
@@ -765,7 +768,7 @@ bool UWomenNativeAnimInstance::PlayThrowAction(bool bSquatThrow)
         return PlayOneShotAction(UpperBodyAnimation, nullptr);
     }
 
-    UAnimMontage* ThrowMontage = GetHeldThrowMontage(bSquatThrow, bRunThrow);
+    UAnimMontage *ThrowMontage = GetHeldThrowMontage(bSquatThrow, bRunThrow);
     if (bFallbackToDefaultThrowAnimation && bSquatThrow)
     {
         ThrowMontage = ThrowMontage ? ThrowMontage : SquatThrowMontage.Get();
@@ -816,11 +819,10 @@ void UWomenNativeAnimInstance::StopThrowAction()
 
 bool UWomenNativeAnimInstance::IsRunningThrow() const
 {
-    return CurrentLocomotionState == EWomenNativeLocomotionState::Run
-        || (bIsSprint && Speed > MoveSpeedThreshold);
+    return CurrentLocomotionState == EWomenNativeLocomotionState::Run || (bIsSprint && Speed > MoveSpeedThreshold);
 }
 
-bool UWomenNativeAnimInstance::PlayUpperBodyAnimation(UAnimSequenceBase* Animation, bool bLoop)
+bool UWomenNativeAnimInstance::PlayUpperBodyAnimation(UAnimSequenceBase *Animation, bool bLoop)
 {
     if (!Animation || UpperBodySlotName.IsNone())
     {
@@ -841,12 +843,12 @@ bool UWomenNativeAnimInstance::PlayUpperBodyAnimation(UAnimSequenceBase* Animati
 bool UWomenNativeAnimInstance::PlayOpenDoorAction()
 {
     const bool bCrouchAction = IsCrouchAction();
-    UAnimSequenceBase* UpperBodyAnimation = bCrouchAction
-        ? SquatOpenDoorUpperBodyAnimation.Get()
-        : StandOpenDoorUpperBodyAnimation.Get();
-    UAnimMontage* Montage = bCrouchAction
-        ? SquatOpenDoorMontage.Get()
-        : StandOpenDoorMontage.Get();
+    UAnimSequenceBase *UpperBodyAnimation = bCrouchAction
+                                                ? SquatOpenDoorUpperBodyAnimation.Get()
+                                                : StandOpenDoorUpperBodyAnimation.Get();
+    UAnimMontage *Montage = bCrouchAction
+                                ? SquatOpenDoorMontage.Get()
+                                : StandOpenDoorMontage.Get();
 
     return PlayOneShotAction(UpperBodyAnimation, Montage);
 }
@@ -854,12 +856,12 @@ bool UWomenNativeAnimInstance::PlayOpenDoorAction()
 bool UWomenNativeAnimInstance::PlayHitAction()
 {
     const bool bCrouchAction = IsCrouchAction();
-    UAnimSequenceBase* UpperBodyAnimation = bCrouchAction 
-        ? SquatHitUpperBodyAnimation.Get() 
-        : StandHitUpperBodyAnimation.Get();
-    UAnimMontage* Montage = bCrouchAction 
-        ? SquatHitMontage.Get() 
-        : StandHitMontage.Get();
+    UAnimSequenceBase *UpperBodyAnimation = bCrouchAction
+                                                ? SquatHitUpperBodyAnimation.Get()
+                                                : StandHitUpperBodyAnimation.Get();
+    UAnimMontage *Montage = bCrouchAction
+                                ? SquatHitMontage.Get()
+                                : StandHitMontage.Get();
 
     return PlayOneShotAction(UpperBodyAnimation, Montage);
 }
@@ -867,6 +869,26 @@ bool UWomenNativeAnimInstance::PlaySoulSuckedAction()
 {
     float LockDuration = 0.f;
     return PlayInterruptibleFullBodyAction(SoulSuckedAnimation.Get(), SoulSuckedMontage.Get(), LockDuration);
+}
+
+void UWomenNativeAnimInstance::StopForcedReactionAction()
+{
+    if (ActiveForcedReactionDynamicMontage)
+    {
+        Montage_Stop(0.1f, ActiveForcedReactionDynamicMontage);
+        ActiveForcedReactionDynamicMontage = nullptr;
+    }
+    else
+    {
+        Montage_Stop(0.1f);
+    }
+
+    bOneShotActionLocked = false;
+    OneShotActionLockTimeRemaining = 0.f;
+    bAnimationTransitionLocked = false;
+    AnimationLockTimeRemaining = 0.f;
+    bNeedsLocomotionReplayAfterForcedAction = true;
+    PreviousLocomotionState = static_cast<EWomenNativeLocomotionState>(255);
 }
 
 bool UWomenNativeAnimInstance::PlayKnockdownAction()
@@ -890,10 +912,7 @@ float UWomenNativeAnimInstance::GetKnockdownActionDuration() const
 }
 bool UWomenNativeAnimInstance::IsCrouchAction() const
 {
-    return bIsSquat
-        || CurrentLocomotionState == EWomenNativeLocomotionState::CrouchEnter
-        || CurrentLocomotionState == EWomenNativeLocomotionState::CrouchIdle
-        || CurrentLocomotionState == EWomenNativeLocomotionState::CrouchWalk;
+    return bIsSquat || CurrentLocomotionState == EWomenNativeLocomotionState::CrouchEnter || CurrentLocomotionState == EWomenNativeLocomotionState::CrouchIdle || CurrentLocomotionState == EWomenNativeLocomotionState::CrouchWalk;
 }
 
 bool UWomenNativeAnimInstance::CanPlayOneShotAction() const
@@ -901,7 +920,7 @@ bool UWomenNativeAnimInstance::CanPlayOneShotAction() const
     return !bOneShotActionLocked;
 }
 
-bool UWomenNativeAnimInstance::PlayOneShotAction(UAnimSequenceBase* UpperBodyAnimation, UAnimMontage* Montage)
+bool UWomenNativeAnimInstance::PlayOneShotAction(UAnimSequenceBase *UpperBodyAnimation, UAnimMontage *Montage)
 {
     if (!CanPlayOneShotAction())
     {
@@ -919,8 +938,7 @@ bool UWomenNativeAnimInstance::PlayOneShotAction(UAnimSequenceBase* UpperBodyAni
             UpperBodyBlendInTime,
             UpperBodyBlendOutTime,
             1.f,
-            1
-        );
+            1);
 
         LockDuration = UpperBodyAnimation->GetPlayLength();
         bPlayed = true;
@@ -942,7 +960,7 @@ bool UWomenNativeAnimInstance::PlayOneShotAction(UAnimSequenceBase* UpperBodyAni
 }
 // WomenNativeAnimInstance.cpp
 
-bool UWomenNativeAnimInstance::PlayInterruptibleFullBodyAction(UAnimSequenceBase* FullBodyAnimation, UAnimMontage* Montage, float& OutDuration)
+bool UWomenNativeAnimInstance::PlayInterruptibleFullBodyAction(UAnimSequenceBase *FullBodyAnimation, UAnimMontage *Montage, float &OutDuration)
 {
     OutDuration = 0.f;
 
@@ -958,18 +976,24 @@ bool UWomenNativeAnimInstance::PlayInterruptibleFullBodyAction(UAnimSequenceBase
     if (Montage)
     {
         Montage_Play(Montage);
+        ActiveForcedReactionDynamicMontage = Montage;
         OutDuration = Montage->GetPlayLength();
     }
     else if (FullBodyAnimation && !ReactionFullBodySlotName.IsNone())
     {
-        PlaySlotAnimationAsDynamicMontage(
+        ActiveForcedReactionDynamicMontage = PlaySlotAnimationAsDynamicMontage(
             FullBodyAnimation,
             ReactionFullBodySlotName,
             ReactionBlendInTime,
             ReactionBlendOutTime,
             1.f,
-            1);
+            FullBodyAnimation == SoulSuckedAnimation.Get() ? MAX_int32 : 1);
         OutDuration = FullBodyAnimation->GetPlayLength();
+    }
+
+    if (FullBodyAnimation == SoulSuckedAnimation.Get() || Montage == SoulSuckedMontage.Get())
+    {
+        OutDuration = 86400.f;
     }
 
     if (OutDuration > 0.f)
@@ -992,7 +1016,7 @@ bool UWomenNativeAnimInstance::PlayEquipMontageForHoldType(EHoldItemType HoldIte
 {
     if (HoldItemType == CurrentHoldType)
     {
-        const FPickupHeldAnimationSet* HeldAnimationSet = GetCurrentHeldAnimationSet();
+        const FPickupHeldAnimationSet *HeldAnimationSet = GetCurrentHeldAnimationSet();
         if (HeldAnimationSet && HeldAnimationSet->EquipMontage)
         {
             Montage_Play(HeldAnimationSet->EquipMontage.Get());
@@ -1000,7 +1024,7 @@ bool UWomenNativeAnimInstance::PlayEquipMontageForHoldType(EHoldItemType HoldIte
         }
     }
 
-    const FNativeHoldAnimationSet* AnimationSet = HoldAnimations.Find(HoldItemType);
+    const FNativeHoldAnimationSet *AnimationSet = HoldAnimations.Find(HoldItemType);
     if (!AnimationSet || !AnimationSet->EquipMontage)
     {
         return false;
@@ -1014,7 +1038,7 @@ bool UWomenNativeAnimInstance::PlayUseMontageForHoldType(EHoldItemType HoldItemT
 {
     if (HoldItemType == CurrentHoldType)
     {
-        const FPickupHeldAnimationSet* HeldAnimationSet = GetCurrentHeldAnimationSet();
+        const FPickupHeldAnimationSet *HeldAnimationSet = GetCurrentHeldAnimationSet();
         if (HeldAnimationSet && HeldAnimationSet->UseMontage)
         {
             Montage_Play(HeldAnimationSet->UseMontage.Get());
@@ -1022,7 +1046,7 @@ bool UWomenNativeAnimInstance::PlayUseMontageForHoldType(EHoldItemType HoldItemT
         }
     }
 
-    const FNativeHoldAnimationSet* AnimationSet = HoldAnimations.Find(HoldItemType);
+    const FNativeHoldAnimationSet *AnimationSet = HoldAnimations.Find(HoldItemType);
     if (!AnimationSet || !AnimationSet->UseMontage)
     {
         return false;

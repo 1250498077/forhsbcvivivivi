@@ -122,11 +122,20 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ghost|Soul Suck", meta = (ClampMin = "0.0"))
     float SoulSuckDuration = 3.f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ghost|Soul Suck", meta = (ClampMin = "0.0"))
+    float SoulSuckLiftHeight = 50.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ghost|Soul Suck", meta = (ClampMin = "0.0"))
+    float SoulSuckLiftInterpSpeed = 2.5f;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ghost|Soul Suck")
     bool bFreezeVictimDuringSoulSuck = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ghost|Soul Suck")
     bool bStopAIMovementDuringSoulSuck = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ghost|Soul Suck", meta = (ClampMin = "0.0"))
+    float SoulSuckBreakRecoveryDuration = 5.f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ghost|Telekinesis")
     bool bEnableTelekineticThrowableThrow = true;
@@ -170,6 +179,9 @@ public:
     UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Ghost|Soul Suck")
     TObjectPtr<AWomenCharacter> CurrentSoulSuckVictim = nullptr;
 
+    UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Ghost|Soul Suck")
+    bool bIsSoulSuckBreakRecoveryActive = false;
+
     UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Ghost|Telekinesis")
     bool bIsTelekineticThrowActive = false;
 
@@ -206,6 +218,12 @@ public:
     void StopSoulSuck();
 
     UFUNCTION(BlueprintCallable, Category = "Ghost|Soul Suck")
+    void StopSoulSuckAfterVictimEscape();
+
+    UFUNCTION(BlueprintPure, Category = "Ghost|Soul Suck")
+    bool IsSoulSuckBreakRecoveryActive() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Ghost|Soul Suck")
     bool InterruptSoulSuckWithKnockdown(AActor* ImpactSourceActor, FVector ImpactDirection, float StunDuration = -1.f);
 
     UFUNCTION(BlueprintCallable, Category = "Ghost|Telekinesis")
@@ -213,6 +231,10 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "Ghost|Telekinesis")
     void StopTelekineticThrowableThrow(bool bLaunchThrowable = true);
+
+    UFUNCTION(BlueprintCallable, Category = "Ghost|Effects")
+    void ApplyTemporaryMoveSpeedMultiplier(float SpeedMultiplier = 1.25f, float Duration = 5.f);
+    
 protected:
     virtual void BeginPlay() override;
 
@@ -248,6 +270,9 @@ protected:
     void MulticastPlayGhostSoulSuckAnimation();
 
     UFUNCTION(NetMulticast, Reliable)
+    void MulticastStopGhostSoulSuckAnimation();
+
+    UFUNCTION(NetMulticast, Reliable)
     void MulticastPlayGhostKnockdownAnimation();
 
 private:
@@ -258,17 +283,28 @@ private:
     void UpdateSoulSuckTriggerDebugVisibility() const;
     void UpdateTelekinesisTriggerDebugVisibility() const;
     void ApplyGhostTurnSettings() const;
+    void OrientSoulSuckVictimTowardGhost(AWomenCharacter* Victim) const;
     void FreezeSoulSuckVictim(AWomenCharacter* Victim) const;
     void UnfreezeSoulSuckVictim(AWomenCharacter* Victim) const;
+    void UpdateSoulSuckVictimLift(float DeltaTime);
+    void StartSoulSuckBreakRecovery();
+    void UpdateSoulSuckBreakRecovery(float DeltaTime);
     float ResolveSoulSuckDuration() const;
     float ResolveGhostKnockdownDuration() const;
     AActor* ResolveTelekineticTargetActor() const;
     bool RefreshTelekineticTargetLocation(FVector& OutLocation);
     void UpdateTelekineticThrowableThrow(float DeltaTime);
+    FTimerHandle TemporaryMoveSpeedMultiplierTimerHandle;
+    float CachedMoveSpeedBeforeTemporaryMultiplier = 0.f;
+    bool bHasCachedMoveSpeedBeforeTemporaryMultiplier = false;
 
+    void RestoreTemporaryMoveSpeedMultiplier();
     AMyAIController* ResolveMyAIController() const;
 
     FTimerHandle SoulSuckTimerHandle;
+    FVector SoulSuckVictimStartLocation = FVector::ZeroVector;
+    FVector SoulSuckVictimTargetLocation = FVector::ZeroVector;
+    float SoulSuckBreakRecoveryTimeRemaining = 0.f;
     TObjectPtr<AActor> CurrentTelekineticTargetActor = nullptr;
     FVector TelekineticStartLocation = FVector::ZeroVector;
     FVector LastTrackedTelekineticTargetLocation = FVector::ZeroVector;

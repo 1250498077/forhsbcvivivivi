@@ -312,10 +312,10 @@ protected:
     bool bUseFlatCardFlight = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Flight", meta = (ClampMin = "0.0"))
-    float FlatCardFlightDuration = 2.0f;
+    float FlatCardFlightDuration = 4.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Flight", meta = (ClampMin = "0.0"))
-    float FlatCardFlightSpeedMultiplier = 0.65f;
+    float FlatCardFlightSpeedMultiplier = 0.35f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Flight", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float FlatCardFlightVerticalAimInfluence = 1.f;

@@ -318,6 +318,9 @@ public:
     bool PlaySoulSuckedAction();
 
     UFUNCTION(BlueprintCallable, Category = "Native Animation|Reaction")
+    void StopForcedReactionAction();
+
+    UFUNCTION(BlueprintCallable, Category = "Native Animation|Reaction")
     bool PlayKnockdownAction();
 
     UFUNCTION(BlueprintPure, Category = "Native Animation|Reaction")
@@ -380,4 +383,7 @@ private:
     bool bThrowUsesLoopingUpperBodySequence = false;
     bool bThrowUsesFullBodySlot = false;
     bool bNeedsLocomotionReplayAfterForcedAction = false;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UAnimMontage> ActiveForcedReactionDynamicMontage = nullptr;
 };

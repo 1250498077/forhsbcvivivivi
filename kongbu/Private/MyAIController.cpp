@@ -277,6 +277,7 @@ void AMyAIController::OnPossess(APawn* InPawn)
     bHasLastSeenPlayerData = false;
     LastSeenPlayerLocation = FVector::ZeroVector;
     LostSightTrackedPlayer = nullptr;
+    PendingLostSightActor = nullptr;
     CurrentFearHidePoint = nullptr;
     FearResponseMode = EFearResponseMode::None;
     bFearHoldingAtHidePoint = false;
@@ -292,6 +293,8 @@ void AMyAIController::OnPossess(APawn* InPawn)
     RageTimeRemaining = 0.f;
     LostSightSearchTimeRemaining = 0.f;
     LostSightTrackTimeRemaining = 0.f;
+    LostSightConfirmationTimeRemaining = 0.f;
+    ResetChaseProgressTracking();
     ActiveMoveRequestId = FAIRequestID::InvalidRequest;
     bPendingRageEnter = false;
     ClearRageSourceState();
@@ -396,6 +399,14 @@ void AMyAIController::Tick(float DeltaTime)
     if (const AGhostCharacter* GhostPawn = Cast<AGhostCharacter>(GetPawn()))
     {
         if (GhostPawn->bStopAIMovementDuringSoulSuck && GhostPawn->bIsSoulSucking)
+        {
+            StopMovement();
+            ActiveMoveRequestId = FAIRequestID::InvalidRequest;
+            bIsMoving = false;
+            return;
+        }
+
+        if (GhostPawn->IsSoulSuckBreakRecoveryActive())
         {
             StopMovement();
             ActiveMoveRequestId = FAIRequestID::InvalidRequest;
@@ -592,9 +603,27 @@ void AMyAIController::Tick(float DeltaTime)
     // 它主要由视觉感知回调 HandleSightStimulus 改写。
     // TargetPlayer 是当前锁定的玩家 Actor 指针；
     // IsValid(TargetPlayer) 用来防止这个 Actor 已经被销毁、失效或为空。
+
+    if (LostSightConfirmationTimeRemaining > 0.f)
+    {
+        LostSightConfirmationTimeRemaining = FMath::Max(0.f, LostSightConfirmationTimeRemaining - DeltaTime);
+        if (LostSightConfirmationTimeRemaining <= 0.f && PendingLostSightActor == TargetPlayer)
+        {
+            AActor* ConfirmedLostActor = PendingLostSightActor;
+            PendingLostSightActor = nullptr;
+            bCanSeePlayer = false;
+            TargetPlayer = nullptr;
+
+            if (!IsFearActive())
+            {
+                StartLostSightInvestigation(ConfirmedLostActor);
+            }
+        }
+    }
+
     if (bCanSeePlayer && IsValid(TargetPlayer))
     {
-        ChasePlayer();
+        ChasePlayer(ShouldForceChaseRefresh(DeltaTime));
         return;
     }
 
@@ -850,6 +879,27 @@ void AMyAIController::RemoveAttachedDisableSource(AActor* SourceActor)
     }
 }
 
+void AMyAIController::BeginSoulSuckBreakRecoveryPause()
+{
+    ClearPatrolRetry();
+    StopMovement();
+    ActiveMoveRequestId = FAIRequestID::InvalidRequest;
+    bIsMoving = false;
+
+    bCanSeePlayer = false;
+    TargetPlayer = nullptr;
+    bHasLastSeenPlayerData = false;
+    LastSeenPlayerLocation = FVector::ZeroVector;
+    LostSightTrackedPlayer = nullptr;
+    CurrentFleeTarget = FVector::ZeroVector;
+    PatrolTarget = FVector::ZeroVector;
+
+    ClearInvestigationState();
+    ClearLureState();
+    ResetChaseProgressTracking();
+    SetAIState(EEnemyAIState::Patrol);
+}
+
 void AMyAIController::EnterStunnedState()
 {
     const bool bWasAlreadyStunned = CurrentState == EEnemyAIState::Stunned;
@@ -1083,7 +1133,7 @@ float AMyAIController::GetResolvedFearDuration(const FFearStimulus& Stimulus) co
 
 // ChasePlayer 负责真正向当前目标玩家发起追逐请求。
 // 它通常不会被外部直接调用，而是在 Tick 发现“当前仍能看到目标”时持续触发。
-void AMyAIController::ChasePlayer()
+void AMyAIController::ChasePlayer(bool bForceRefreshMove)
 {
     if (CurrentState == EEnemyAIState::Stunned || IsFearActive() || !IsValid(TargetPlayer))
     {
@@ -1091,8 +1141,65 @@ void AMyAIController::ChasePlayer()
     }
 
     ClearPatrolRetry();
+    const bool bWasAlreadyChasing = CurrentState == EEnemyAIState::Chase;
     SetAIState(EEnemyAIState::Chase);
+    if (bWasAlreadyChasing && IsPathFollowingMoveActive(this) && !bForceRefreshMove)
+    {
+        bIsMoving = true;
+        return;
+    }
     bIsMoving = RequestMoveToActor(TargetPlayer, ChaseAcceptanceRadius);
+}
+
+bool AMyAIController::ShouldForceChaseRefresh(float DeltaTime)
+{
+    APawn* ControlledPawn = GetPawn();
+    if (!IsValid(ControlledPawn)
+        || CurrentState != EEnemyAIState::Chase
+        || !IsValid(TargetPlayer)
+        || !IsPathFollowingMoveActive(this))
+    {
+        ResetChaseProgressTracking();
+        return false;
+    }
+
+    ChaseRepathCooldownRemaining = FMath::Max(0.f, ChaseRepathCooldownRemaining - DeltaTime);
+
+    const FVector CurrentLocation = ControlledPawn->GetActorLocation();
+    if (!bHasLastChaseProgressLocation)
+    {
+        LastChaseProgressLocation = CurrentLocation;
+        bHasLastChaseProgressLocation = true;
+        ChaseStuckTime = 0.f;
+        return false;
+    }
+
+    const float ProgressDistance = FVector::Dist2D(CurrentLocation, LastChaseProgressLocation);
+    if (ProgressDistance >= ChaseStuckMovementThreshold)
+    {
+        LastChaseProgressLocation = CurrentLocation;
+        ChaseStuckTime = 0.f;
+        return false;
+    }
+
+    ChaseStuckTime += DeltaTime;
+    if (ChaseStuckTime < ChaseStuckRepathDelay || ChaseRepathCooldownRemaining > 0.f)
+    {
+        return false;
+    }
+
+    LastChaseProgressLocation = CurrentLocation;
+    ChaseStuckTime = 0.f;
+    ChaseRepathCooldownRemaining = ChaseStuckRepathCooldown;
+    return true;
+}
+
+void AMyAIController::ResetChaseProgressTracking()
+{
+    bHasLastChaseProgressLocation = false;
+    LastChaseProgressLocation = FVector::ZeroVector;
+    ChaseStuckTime = 0.f;
+    ChaseRepathCooldownRemaining = 0.f;
 }
 
 // Patrol 是默认行为。
@@ -1101,6 +1208,12 @@ void AMyAIController::Patrol()
 {
     if (CurrentState == EEnemyAIState::Stunned || IsFearActive() || !GetPawn())
     {
+        return;
+    }
+
+    if (bCanSeePlayer && IsValid(TargetPlayer))
+    {
+        ChasePlayer();
         return;
     }
 
@@ -1332,6 +1445,12 @@ void AMyAIController::ApplyInvestigationFromLocation(FVector SourceLocation, flo
         return;
     }
 
+    if (bCanSeePlayer && IsValid(TargetPlayer))
+    {
+        ChasePlayer();
+        return;
+    }
+
     // 调查状态会记住目标点和停留时间。到点后不会立刻切回巡逻，而是先原地观察一小段时间。
     InvestigateTarget = SourceLocation;
     InvestigateWaitTimeRemaining = WaitDuration > 0.f ? WaitDuration : DefaultInvestigateWaitDuration;
@@ -1497,7 +1616,7 @@ void AMyAIController::ApplyFlashlightReveal(float RevealDuration)
     }
 
     bFlashlightRevealActive = true;
-    FlashlightRevealTimeRemaining = ResolvedRevealDuration;
+    FlashlightRevealTimeRemaining = FMath::Max(FlashlightRevealTimeRemaining, ResolvedRevealDuration);
     ApplyGhostVisualState();
 }
 
@@ -1649,17 +1768,27 @@ void AMyAIController::HandleSightStimulus(AActor* Actor, const FAIStimulus& Stim
         RecordLastSeenPlayerData(Actor, &Stimulus);
         bCanSeePlayer = true;
         TargetPlayer = Actor;
+        PendingLostSightActor = nullptr;
+        LostSightConfirmationTimeRemaining = 0.f;
 
         if (!IsFearActive())
         {
+            const bool bWasAlreadyChasing = CurrentState == EEnemyAIState::Chase;
             // 这里先停掉旧移动并切状态。
             // 真正的持续追逐请求由 Tick 每帧调用 ChasePlayer 来统一下发。
-            StopMovement();
+            ClearPatrolRetry();
+            if (!bWasAlreadyChasing)
+            {
+                StopMovement();
+            }
             ClearInvestigationState();
             SetAIState(EEnemyAIState::Chase);
+            ChasePlayer();
         }
         return;
     }
+
+
 
     if (TargetPlayer == Actor)
     {
@@ -1667,13 +1796,29 @@ void AMyAIController::HandleSightStimulus(AActor* Actor, const FAIStimulus& Stim
         {
             if (!IsFearActive())
             {
-                StopMovement();
+                const bool bWasAlreadyChasing = CurrentState == EEnemyAIState::Chase;
+                ClearPatrolRetry();
+                if (!bWasAlreadyChasing)
+                {
+                    StopMovement();
+                }
                 ClearInvestigationState();
                 SetAIState(EEnemyAIState::Chase);
+                ChasePlayer();
             }
 
             return;
         }
+
+        PendingLostSightActor = Actor;
+        LostSightConfirmationTimeRemaining = LostSightConfirmationDelay;
+
+        if (LostSightConfirmationTimeRemaining > 0.f)
+        {
+            return;
+        }
+
+        PendingLostSightActor = nullptr;
 
         bCanSeePlayer = false;
         TargetPlayer = nullptr;
@@ -1782,6 +1927,8 @@ bool AMyAIController::AcquireVisiblePlayerTarget()
 
     TargetPlayer = BestTarget;
     bCanSeePlayer = true;
+    PendingLostSightActor = nullptr;
+    LostSightConfirmationTimeRemaining = 0.f;
     RecordLastSeenPlayerData(BestTarget);
     return true;
 }
@@ -2149,6 +2296,8 @@ void AMyAIController::ClearInvestigationState()
     LostSightTrackedPlayer = nullptr;
     LostSightSearchTimeRemaining = 0.f;
     LostSightTrackTimeRemaining = 0.f;
+    PendingLostSightActor = nullptr;
+    LostSightConfirmationTimeRemaining = 0.f;
     bUseLookAroundAfterInvestigateMove = false;
     bIsLookAroundActive = false;
     LookAroundCenterYaw = 0.f;

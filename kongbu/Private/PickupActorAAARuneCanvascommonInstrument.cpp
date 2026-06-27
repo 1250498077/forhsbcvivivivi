@@ -133,6 +133,13 @@ void APickupActorAAARuneCanvascommonInstrument::BeginPlay()
 void APickupActorAAARuneCanvascommonInstrument::OnConstruction(const FTransform &Transform)
 {
     Super::OnConstruction(Transform);
+    // if (DrawSurfaceComponent)
+    // {
+    //     DrawSurfaceComponent->SetRelativeLocation(FVector(-0.1f, 0.f, 9.f));
+    //     DrawSurfaceComponent->SetRelativeRotation(FRotator(0.f, -90.f, 90.f));
+    //     DrawSurfaceComponent->SetRelativeScale3D(FVector(0.28f, 0.285f, 1.f));
+    // }
+
     RebuildRecognitionGridPreview();
     ApplyThrowablePhysicsTuning();
 

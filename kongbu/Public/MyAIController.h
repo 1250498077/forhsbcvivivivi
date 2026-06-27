@@ -201,6 +201,9 @@ public:
     // 移除一个持续禁用来源；最后一个来源移除后，鬼才允许恢复。
     void RemoveAttachedDisableSource(AActor* SourceActor);
 
+    // 玩家挣脱吸魂后，让鬼先原地停顿，再回到普通找人逻辑。
+    void BeginSoulSuckBreakRecoveryPause();
+
 
 protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
@@ -404,9 +407,26 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Visual")
     TArray<TObjectPtr<UMaterialInterface>> HiddenGhostMaterialOverrides;
 
+
+    // Chase 中连续几乎不移动超过这个时间后，主动重发一次追击路径。
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Movement", meta = (ClampMin = "0.1"))
+    float ChaseStuckRepathDelay = 0.75f;
+
+    // Chase 中每帧位移小于这个距离时，认为这段时间没有明显前进。
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Movement", meta = (ClampMin = "1.0"))
+    float ChaseStuckMovementThreshold = 12.f;
+
+    // 卡住后重发追击路径的最小间隔，避免在门口每帧重复发 MoveTo。
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Movement", meta = (ClampMin = "0.1"))
+    float ChaseStuckRepathCooldown = 0.35f;
+
     // 刚丢失玩家视野后，最后已知位置还会被持续跟踪多久。
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Investigate", meta = (ClampMin = "0.0"))
-    float LostSightTrackDuration = 1.f;
+    float LostSightTrackDuration = 2.f;
+
+    // 视觉短暂抖动时先继续追击这么久，确认真的丢失后再进入搜查。
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Investigate", meta = (ClampMin = "0.0"))
+    float LostSightConfirmationDelay = 0.65f;
 
     // 丢失视野后最长搜查时长。
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Investigate", meta = (ClampMin = "0.1"))
@@ -538,7 +558,7 @@ protected:
     void Patrol();
 
     // 对当前锁定的目标玩家持续发起追逐请求；只要仍可见，就保持该逻辑不变。
-    void ChasePlayer();
+    void ChasePlayer(bool bForceRefreshMove = false);
 
     // 在当前 Pawn 附近取一个可达随机点，作为巡逻候选位置。
     FVector GetRandomPatrolPoint();
@@ -588,6 +608,9 @@ private:
     float RageTimeRemaining = 0.f;
     float LostSightSearchTimeRemaining = 0.f;
     float LostSightTrackTimeRemaining = 0.f;
+    float LostSightConfirmationTimeRemaining = 0.f;
+    float ChaseStuckTime = 0.f;
+    float ChaseRepathCooldownRemaining = 0.f;
     float LookAroundCenterYaw = 0.f;
     float LookAroundTargetYaw = 0.f;
     float LookAroundYawAccumulated = 0.f;
@@ -618,6 +641,8 @@ private:
     FVector RageSourceLocation = FVector::ZeroVector;
     FVector LastFearAngerSourceLocation = FVector::ZeroVector;
     FVector SuppressedFearAngerSourceLocation = FVector::ZeroVector;
+    FVector LastChaseProgressLocation = FVector::ZeroVector;
+    AActor* PendingLostSightActor = nullptr;
     FVector SuppressedStunSourceLocation = FVector::ZeroVector;
     FVector LureTargetLocation = FVector::ZeroVector;
     TObjectPtr<AActor> RageSourceActor = nullptr;
@@ -627,6 +652,7 @@ private:
     TObjectPtr<AActor> LureSourceActor = nullptr;
     bool bLureActive = false;
     bool bLureReachedTarget = false;
+    bool bHasLastChaseProgressLocation = false;
     float LureDazeTimeRemaining = 0.f;
     float LureAcceptanceRadius = 120.f;
     TArray<TWeakObjectPtr<AActor>> ActiveRageThreatSources;
@@ -652,6 +678,9 @@ private:
     bool bHasCachedGhostMeshCollisionResponses = false;
     ECollisionResponse CachedGhostCapsuleWorldDynamicResponse = ECR_Block;
     ECollisionResponse CachedGhostCapsulePhysicsBodyResponse = ECR_Block;
+
+    bool ShouldForceChaseRefresh(float DeltaTime);
+    void ResetChaseProgressTracking();
     ECollisionResponse CachedGhostMeshWorldDynamicResponse = ECR_Block;
     ECollisionResponse CachedGhostMeshPhysicsBodyResponse = ECR_Block;
 

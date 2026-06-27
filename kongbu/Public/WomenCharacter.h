@@ -6,6 +6,7 @@
 #include "WomenCharacter.generated.h"
 
 class FLifetimeProperty;
+class AGhostCharacter;
 class APickupActor;
 class UWomenNativeAnimInstance;
 
@@ -204,7 +205,10 @@ public:
     void HideHeldItemThirdPersonDebugMesh();
 
     UFUNCTION(BlueprintCallable, Category = "Reaction")
-    void StartSoulSuckReaction();
+    void StartSoulSuckReaction(AGhostCharacter* SourceGhost);
+
+    UFUNCTION(BlueprintCallable, Category = "Reaction")
+    bool TryInterruptSoulSuckByInput();
 
     UFUNCTION(BlueprintCallable, Category = "Reaction")
     void InterruptSoulSuckWithKnockdown(float KnockdownDuration = -1.f);
@@ -237,9 +241,15 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Replicated, Category = "Reaction")
     bool bIsKnockedDown = false;
 
+    UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Reaction")
+    TObjectPtr<AGhostCharacter> CurrentSoulSuckingGhost = nullptr;
+
 protected:
     UFUNCTION(NetMulticast, Reliable)
     void MulticastPlaySoulSuckReactionAnimation();
+
+    UFUNCTION(NetMulticast, Reliable)
+    void MulticastStopForcedReactionAnimation();
 
     UFUNCTION(NetMulticast, Reliable)
     void MulticastPlayKnockdownReactionAnimation();

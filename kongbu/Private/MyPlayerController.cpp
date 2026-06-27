@@ -5,6 +5,7 @@
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "GameFramework/Character.h"
+#include "GhostCharacter.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -19,6 +20,9 @@
 #include "PickupActorAAARuneInstrument.h"
 #include "PickupActorAAASlowTalisman.h"
 #include "TabUI.h"
+#include "VaultableComponent.h"
+#include "Animation/AnimInstance.h"
+#include "Animation/AnimMontage.h"
 
 AMyPlayerController::AMyPlayerController()
 {
@@ -81,6 +85,7 @@ void AMyPlayerController::SetupInputComponent()
         if (MoveForwardAction)
         {
             EI->BindAction(MoveForwardAction, ETriggerEvent::Triggered, this, &AMyPlayerController::MoveForward);
+            EI->BindAction(MoveForwardAction, ETriggerEvent::Completed, this, &AMyPlayerController::MoveForward);
         }
         // D键位
         if (MoveRightAction)
@@ -421,12 +426,33 @@ void AMyPlayerController::TryCloseHeldActorBehavior()
 void AMyPlayerController::MoveForward(const FInputActionValue &Value)
 {
     float AxisValue = Value.Get<float>();
+    bMoveForwardInputActive = AxisValue > KINDA_SMALL_NUMBER;
+
+    if (bVaultActive)
+    {
+        return;
+    }
+    if (AxisValue > KINDA_SMALL_NUMBER)
+    {
+        if (AWomenCharacter* MyChar = Cast<AWomenCharacter>(GetPawn()))
+        {
+            if (MyChar->TryInterruptSoulSuckByInput())
+            {
+                return;
+            }
+        }
+    }
+
     if (APawn *ControlledPawn = GetPawn())
         ControlledPawn->AddMovementInput(ControlledPawn->GetActorForwardVector(), AxisValue);
 }
 
 void AMyPlayerController::MoveRight(const FInputActionValue &Value)
 {
+    if (bVaultActive)
+    {
+        return;
+    }
     float AxisValue = Value.Get<float>();
     if (APawn *ControlledPawn = GetPawn())
         ControlledPawn->AddMovementInput(ControlledPawn->GetActorRightVector(), AxisValue);
@@ -434,6 +460,10 @@ void AMyPlayerController::MoveRight(const FInputActionValue &Value)
 
 void AMyPlayerController::Jump()
 {
+    if (TryStartVault())
+    {
+        return;
+    }
     if (AWomenCharacter *MyChar = Cast<AWomenCharacter>(GetPawn()))
     {
         if (MyChar->IsSquat)
@@ -1058,27 +1088,31 @@ bool AMyPlayerController::CanThrowHeldActor() const
 void AMyPlayerController::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
+    UpdateVault(DeltaTime);
 
     // 冲刺不是瞬间切换，而是逐帧平滑插值到目标速度。
-    if (ACharacter *Char = Cast<ACharacter>(GetPawn()))
+    if (!bVaultActive)
     {
-        UCharacterMovementComponent *MoveComp = Char->GetCharacterMovement();
-        float CurrentSpeed = MoveComp->MaxWalkSpeed;
-        const AWomenCharacter *MyChar = Cast<AWomenCharacter>(Char);
-        const bool bIsSquatting = MyChar && MyChar->IsSquat;
-        // const bool bCanSprint = bWantsToSprint && (!MyChar || !MyChar->IsSquat);
-        const bool bCanSprint = bWantsToSprint && CanSprintWithHeldActor() && !MyChar->IsSquat;
+        if (ACharacter *Char = Cast<ACharacter>(GetPawn()))
+        {
+            UCharacterMovementComponent *MoveComp = Char->GetCharacterMovement();
+            float CurrentSpeed = MoveComp->MaxWalkSpeed;
+            const AWomenCharacter *MyChar = Cast<AWomenCharacter>(Char);
+            const bool bIsSquatting = MyChar && MyChar->IsSquat;
+            // const bool bCanSprint = bWantsToSprint && (!MyChar || !MyChar->IsSquat);
+            const bool bCanSprint = bWantsToSprint && CanSprintWithHeldActor() && MyChar && !MyChar->IsSquat;
 
-        if (bCanSprint)
-        {
-            float NewSpeed = FMath::FInterpConstantTo(CurrentSpeed, RunSpeed, DeltaTime, SpeedUpRate);
-            MoveComp->MaxWalkSpeed = NewSpeed;
-        }
-        else
-        {
-            const float TargetWalkSpeed = bIsSquatting ? CrouchSpeed : WalkSpeed;
-            float NewSpeed = FMath::FInterpConstantTo(CurrentSpeed, TargetWalkSpeed, DeltaTime, SpeedDownRate);
-            MoveComp->MaxWalkSpeed = NewSpeed;
+            if (bCanSprint)
+            {
+                float NewSpeed = FMath::FInterpConstantTo(CurrentSpeed, RunSpeed, DeltaTime, SpeedUpRate);
+                MoveComp->MaxWalkSpeed = NewSpeed;
+            }
+            else
+            {
+                const float TargetWalkSpeed = bIsSquatting ? CrouchSpeed : WalkSpeed;
+                float NewSpeed = FMath::FInterpConstantTo(CurrentSpeed, TargetWalkSpeed, DeltaTime, SpeedDownRate);
+                MoveComp->MaxWalkSpeed = NewSpeed;
+            }
         }
     }
 
@@ -1136,6 +1170,174 @@ void AMyPlayerController::Tick(float DeltaTime)
         WallHit, PawnLoc, HeldLoc, ECC_Visibility, WallParams);
 
     HeldActor->SetActorHiddenInGame(bWallHit);
+}
+
+bool AMyPlayerController::TryStartVault()
+{
+    if (bVaultActive || !bMoveForwardInputActive)
+    {
+        return false;
+    }
+
+    FVector LandingLocation = FVector::ZeroVector;
+    UVaultableComponent* VaultableComponent = FindBestVaultable(LandingLocation);
+    if (!IsValid(VaultableComponent))
+    {
+        return false;
+    }
+
+    if (HasAuthority())
+    {
+        StartVault(VaultableComponent, LandingLocation);
+    }
+    else
+    {
+        PlayVaultMontage(VaultableComponent);
+        ServerTryStartVault();
+    }
+
+    return true;
+}
+
+UVaultableComponent* AMyPlayerController::FindBestVaultable(FVector& OutLandingLocation) const
+{
+    OutLandingLocation = FVector::ZeroVector;
+
+    ACharacter* PlayerCharacter = Cast<ACharacter>(GetPawn());
+    UWorld* World = GetWorld();
+    if (!IsValid(PlayerCharacter) || !World)
+    {
+        return nullptr;
+    }
+
+    FVector ViewLocation = FVector::ZeroVector;
+    FRotator ViewRotation = FRotator::ZeroRotator;
+    GetPlayerViewPoint(ViewLocation, ViewRotation);
+
+    UVaultableComponent* BestVaultable = nullptr;
+    float BestDistanceSq = TNumericLimits<float>::Max();
+
+    for (TActorIterator<AActor> It(World); It; ++It)
+    {
+        AActor* CandidateActor = *It;
+        if (!IsValid(CandidateActor) || CandidateActor == PlayerCharacter)
+        {
+            continue;
+        }
+
+        UVaultableComponent* CandidateVaultable = CandidateActor->FindComponentByClass<UVaultableComponent>();
+        if (!IsValid(CandidateVaultable))
+        {
+            continue;
+        }
+
+        EVaultSide StartSide = EVaultSide::None;
+        FVector CandidateLandingLocation = FVector::ZeroVector;
+        if (!CandidateVaultable->CanVaultFromView(PlayerCharacter, ViewLocation, ViewRotation.Vector(), StartSide, CandidateLandingLocation))
+        {
+            continue;
+        }
+
+        const float DistanceSq = FVector::DistSquared(PlayerCharacter->GetActorLocation(), CandidateVaultable->GetComponentLocation());
+        if (!BestVaultable || DistanceSq < BestDistanceSq)
+        {
+            BestVaultable = CandidateVaultable;
+            BestDistanceSq = DistanceSq;
+            OutLandingLocation = CandidateLandingLocation;
+        }
+    }
+
+    return BestVaultable;
+}
+
+void AMyPlayerController::StartVault(UVaultableComponent* VaultableComponent, const FVector& LandingLocation)
+{
+    ACharacter* PlayerCharacter = Cast<ACharacter>(GetPawn());
+    if (!IsValid(PlayerCharacter) || !IsValid(VaultableComponent))
+    {
+        return;
+    }
+
+    bVaultActive = true;
+    ActiveVaultableComponent = VaultableComponent;
+    VaultStartLocation = PlayerCharacter->GetActorLocation();
+    VaultTargetLocation = LandingLocation;
+    VaultElapsedTime = 0.f;
+    ActiveVaultDuration = FMath::Max(VaultableComponent->VaultDuration, KINDA_SMALL_NUMBER);
+    ActiveVaultArcHeight = FMath::Max(0.f, VaultableComponent->VaultArcHeight);
+
+    if (UCharacterMovementComponent* MovementComponent = PlayerCharacter->GetCharacterMovement())
+    {
+        MovementComponent->StopMovementImmediately();
+        MovementComponent->DisableMovement();
+    }
+
+    SetIgnoreMoveInput(true);
+    SetIgnoreLookInput(false);
+    PlayVaultMontage(VaultableComponent);
+}
+
+void AMyPlayerController::UpdateVault(float DeltaTime)
+{
+    if (!bVaultActive)
+    {
+        return;
+    }
+
+    ACharacter* PlayerCharacter = Cast<ACharacter>(GetPawn());
+    if (!IsValid(PlayerCharacter))
+    {
+        FinishVault();
+        return;
+    }
+
+    VaultElapsedTime += DeltaTime;
+    const float Alpha = FMath::Clamp(VaultElapsedTime / FMath::Max(ActiveVaultDuration, KINDA_SMALL_NUMBER), 0.f, 1.f);
+    const float SmoothAlpha = FMath::InterpEaseInOut(0.f, 1.f, Alpha, 2.f);
+    FVector NewLocation = FMath::Lerp(VaultStartLocation, VaultTargetLocation, SmoothAlpha);
+    NewLocation.Z += FMath::Sin(Alpha * PI) * ActiveVaultArcHeight;
+
+    PlayerCharacter->SetActorLocation(NewLocation, false, nullptr, ETeleportType::TeleportPhysics);
+
+    if (Alpha >= 1.f)
+    {
+        FinishVault();
+    }
+}
+
+void AMyPlayerController::FinishVault()
+{
+    ACharacter* PlayerCharacter = Cast<ACharacter>(GetPawn());
+    if (IsValid(PlayerCharacter))
+    {
+        PlayerCharacter->SetActorLocation(VaultTargetLocation, false, nullptr, ETeleportType::TeleportPhysics);
+        if (UCharacterMovementComponent* MovementComponent = PlayerCharacter->GetCharacterMovement())
+        {
+            MovementComponent->SetMovementMode(MOVE_Walking);
+        }
+    }
+
+    SetIgnoreMoveInput(false);
+    bVaultActive = false;
+    ActiveVaultableComponent = nullptr;
+    VaultElapsedTime = 0.f;
+}
+
+void AMyPlayerController::PlayVaultMontage(UVaultableComponent* VaultableComponent) const
+{
+    ACharacter* PlayerCharacter = Cast<ACharacter>(GetPawn());
+    if (!IsValid(PlayerCharacter) || !IsValid(VaultableComponent) || !VaultableComponent->VaultMontage)
+    {
+        return;
+    }
+
+    if (USkeletalMeshComponent* MeshComponent = PlayerCharacter->GetMesh())
+    {
+        if (UAnimInstance* AnimInstance = MeshComponent->GetAnimInstance())
+        {
+            AnimInstance->Montage_Play(VaultableComponent->VaultMontage);
+        }
+    }
 }
 
 void AMyPlayerController::ThrowHeldActor()
@@ -1627,5 +1829,15 @@ void AMyPlayerController::ServerToggleSquatState_Implementation()
     {
         MyChar->IsSquat = !MyChar->IsSquat;
         ApplySprintAnimationState(MyChar);
+    }
+}
+
+void AMyPlayerController::ServerTryStartVault_Implementation()
+{
+    FVector LandingLocation = FVector::ZeroVector;
+    UVaultableComponent* VaultableComponent = FindBestVaultable(LandingLocation);
+    if (IsValid(VaultableComponent))
+    {
+        StartVault(VaultableComponent, LandingLocation);
     }
 }

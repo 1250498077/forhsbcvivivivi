@@ -15,6 +15,7 @@ class APickupActor;
 class APickupActorAAARuneInstrument;
 class APickupActorAAARuneGridInstrument;
 class AWomenCharacter;
+class UVaultableComponent;
 
 UCLASS()
 class KONGBU_API AMyPlayerController : public APlayerController
@@ -221,6 +222,15 @@ protected:
     bool bHasDeferredSprintInput = false;
     bool bDeferredWantsToSprint = false;
     bool bIsRunAbtInputActive = false;
+    bool bMoveForwardInputActive = false;
+
+    bool bVaultActive = false;
+    FVector VaultStartLocation = FVector::ZeroVector;
+    FVector VaultTargetLocation = FVector::ZeroVector;
+    float VaultElapsedTime = 0.f;
+    float ActiveVaultDuration = 0.f;
+    float ActiveVaultArcHeight = 0.f;
+    TObjectPtr<UVaultableComponent> ActiveVaultableComponent = nullptr;
 
     void SprintStart();
     void SprintStop();
@@ -235,6 +245,13 @@ protected:
     void LookUp(const FInputActionValue& Value);
     void LookRight(const FInputActionValue& Value);
 
+    bool TryStartVault();
+    UVaultableComponent* FindBestVaultable(FVector& OutLandingLocation) const;
+    void StartVault(UVaultableComponent* VaultableComponent, const FVector& LandingLocation);
+    void UpdateVault(float DeltaTime);
+    void FinishVault();
+    void PlayVaultMontage(UVaultableComponent* VaultableComponent) const;
+
     // 拾取、放下和投掷辅助逻辑。
     void TryPickup();
     void TryPutDown();
@@ -248,6 +265,9 @@ protected:
 
     UFUNCTION(Server, Reliable)
     void ServerToggleDoor(AConfigurableDoorActor* DoorActor);
+
+    UFUNCTION(Server, Reliable)
+    void ServerTryStartVault();
 
     // Tick 负责平滑速度变化、手持物 bob 动画和遮挡隐藏。
     virtual void Tick(float DeltaTime) override;

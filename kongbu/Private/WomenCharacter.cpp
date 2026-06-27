@@ -7,6 +7,7 @@
 #include "Components/SceneComponent.h"
 #include "Components/staticMeshComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "GhostCharacter.h"
 #include "Net/UnrealNetwork.h"
 #include "WomenNativeAnimInstance.h"
 
@@ -513,10 +514,12 @@ void AWomenCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
     DOREPLIFETIME(AWomenCharacter, bIsSoulSucked);
     DOREPLIFETIME(AWomenCharacter, bIsKnockedDown);
 }
-void AWomenCharacter::StartSoulSuckReaction()
+
+
+void AWomenCharacter::StartSoulSuckReaction(AGhostCharacter* SourceGhost)
 {
     GetWorldTimerManager().ClearTimer(ForcedReactionTimerHandle);
-
+    CurrentSoulSuckingGhost = SourceGhost;
     bIsSoulSucked = true;
     bIsKnockedDown = false;
     IsMiddleHandleTime = false;
@@ -532,10 +535,29 @@ void AWomenCharacter::StartSoulSuckReaction()
 
     MulticastPlaySoulSuckReactionAnimation();
 }
+
+bool AWomenCharacter::TryInterruptSoulSuckByInput()
+{
+    if (!bIsSoulSucked)
+    {
+        return false;
+    }
+
+    AGhostCharacter* SourceGhost = CurrentSoulSuckingGhost;
+    if (IsValid(SourceGhost) && SourceGhost->bIsSoulSucking)
+    {
+        SourceGhost->StopSoulSuckAfterVictimEscape();
+        return true;
+    }
+
+    ClearForcedReactionState();
+    return true;
+}
+
 void AWomenCharacter::InterruptSoulSuckWithKnockdown(float KnockdownDuration)
 {
     GetWorldTimerManager().ClearTimer(ForcedReactionTimerHandle);
-
+    CurrentSoulSuckingGhost = nullptr;
     bIsSoulSucked = false;
     bIsKnockedDown = true;
     IsMiddleHandleTime = false;
@@ -564,8 +586,11 @@ void AWomenCharacter::InterruptSoulSuckWithKnockdown(float KnockdownDuration)
 void AWomenCharacter::ClearForcedReactionState()
 {
     GetWorldTimerManager().ClearTimer(ForcedReactionTimerHandle);
+    CurrentSoulSuckingGhost = nullptr;
     bIsSoulSucked = false;
     bIsKnockedDown = false;
+
+    MulticastStopForcedReactionAnimation();
 
     if (UCharacterMovementComponent* MovementComponent = GetCharacterMovement())
     {
@@ -578,6 +603,14 @@ void AWomenCharacter::MulticastPlaySoulSuckReactionAnimation_Implementation()
     if (UWomenNativeAnimInstance* AnimInstance = ResolveWomenNativeAnimInstance())
     {
         AnimInstance->PlaySoulSuckedAction();
+    }
+}
+
+void AWomenCharacter::MulticastStopForcedReactionAnimation_Implementation()
+{
+    if (UWomenNativeAnimInstance* AnimInstance = ResolveWomenNativeAnimInstance())
+    {
+        AnimInstance->StopForcedReactionAction();
     }
 }
 

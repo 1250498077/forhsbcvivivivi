@@ -7,7 +7,6 @@
 #include "Curves/CurveFloat.h"
 #include "DrawDebugHelpers.h"
 
-
 AConfigurableDoorActor::AConfigurableDoorActor()
 {
     PrimaryActorTick.bCanEverTick = true;
@@ -25,7 +24,12 @@ AConfigurableDoorActor::AConfigurableDoorActor()
     DoorMeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("DoorMeshComponent"));
     DoorMeshComponent->SetupAttachment(DoorMotionRootComponent);
     DoorMeshComponent->SetMobility(EComponentMobility::Movable);
-    DoorMeshComponent->SetCanEverAffectNavigation(false);
+    DoorBlockerComponent = CreateDefaultSubobject<UBoxComponent>(TEXT("DoorBlockerComponent"));
+    DoorBlockerComponent->SetupAttachment(DoorMotionRootComponent);
+    DoorBlockerComponent->SetBoxExtent(DoorBlockerExtent);
+    ConfigureDoorMeshBlocking();
+
+
 
     InteractionRangeComponent = CreateDefaultSubobject<UBoxComponent>(TEXT("InteractionRangeComponent"));
     InteractionRangeComponent->SetupAttachment(SceneRootComponent);
@@ -56,14 +60,22 @@ void AConfigurableDoorActor::BeginPlay()
 {
     Super::BeginPlay();
 
+    ConfigureDoorMeshBlocking();
     bIsAnimating = false;
     bIsOpen = bStartOpened;
     ApplyDoorStateInstant(bStartOpened);
 }
 
-void AConfigurableDoorActor::OnConstruction(const FTransform& Transform)
+void AConfigurableDoorActor::OnConstruction(const FTransform &Transform)
 {
     Super::OnConstruction(Transform);
+
+    ConfigureDoorMeshBlocking();
+
+    if (DoorBlockerComponent)
+    {
+        DoorBlockerComponent->SetBoxExtent(DoorBlockerExtent.ComponentMax(FVector::ZeroVector));
+    }
 
     if (InteractionRangeComponent)
     {
@@ -82,7 +94,30 @@ void AConfigurableDoorActor::OnConstruction(const FTransform& Transform)
         ApplyDoorStateInstant(EditorPreviewState == EDoorEditorPreviewState::Open);
     }
 #endif
+}
 
+void AConfigurableDoorActor::ConfigureDoorMeshBlocking()
+{
+    if (DoorMeshComponent)
+    {
+        DoorMeshComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        DoorMeshComponent->SetCollisionObjectType(ECC_WorldDynamic);
+        DoorMeshComponent->SetCollisionResponseToAllChannels(ECR_Block);
+        DoorMeshComponent->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
+        DoorMeshComponent->SetGenerateOverlapEvents(false);
+        DoorMeshComponent->SetCanEverAffectNavigation(true);
+    }
+
+    if (DoorBlockerComponent)
+    {
+        DoorBlockerComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        DoorBlockerComponent->SetCollisionObjectType(ECC_WorldDynamic);
+        DoorBlockerComponent->SetCollisionResponseToAllChannels(ECR_Block);
+        DoorBlockerComponent->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
+        DoorBlockerComponent->SetGenerateOverlapEvents(false);
+        DoorBlockerComponent->SetCanEverAffectNavigation(true);
+        DoorBlockerComponent->SetHiddenInGame(true);
+    }
 }
 
 void AConfigurableDoorActor::Tick(float DeltaSeconds)
@@ -181,25 +216,33 @@ float AConfigurableDoorActor::EvaluateAnimationAlpha(float NormalizedAlpha) cons
 
 FTransform AConfigurableDoorActor::GetClosedDoorTransform() const
 {
-    return ClosedStateTransformComponent 
-        ? ClosedStateTransformComponent->GetRelativeTransform() 
-        : FTransform::Identity;
+    return ClosedStateTransformComponent
+               ? ClosedStateTransformComponent->GetRelativeTransform()
+               : FTransform::Identity;
 }
 
 FTransform AConfigurableDoorActor::GetOpenedDoorTransform() const
 {
-    return OpenStateTransformComponent 
-    ? OpenStateTransformComponent->GetRelativeTransform() 
-    : FTransform(FRotator(0.f, 90.f, 0.f));
+    return OpenStateTransformComponent
+               ? OpenStateTransformComponent->GetRelativeTransform()
+               : FTransform(FRotator(0.f, 90.f, 0.f));
 }
 
 void AConfigurableDoorActor::OpenDoor()
 {
+    if (bIsLockedClosed)
+    {
+        return;
+    }
     SetDoorOpenState(true, false);
 }
 
 void AConfigurableDoorActor::CloseDoor()
 {
+    if (bIsLockedClosed)
+    {
+        return;
+    }
     SetDoorOpenState(false, false);
 }
 
@@ -211,6 +254,10 @@ void AConfigurableDoorActor::ToggleDoor()
 
 void AConfigurableDoorActor::SetDoorOpenState(bool bNewOpenState, bool bInstant)
 {
+    if (bIsLockedClosed && bNewOpenState)
+    {
+        return;
+    }
     bAnimationTargetOpen = bNewOpenState;
 
     if (bInstant)
@@ -222,6 +269,28 @@ void AConfigurableDoorActor::SetDoorOpenState(bool bNewOpenState, bool bInstant)
     }
 
     StartDoorAnimation(bNewOpenState);
+}
+
+void AConfigurableDoorActor::LockDoorClosedForDuration(float Duration)
+{
+    if (Duration <= 0.f)
+    {
+        return;
+    }
+    bIsLockedClosed = true;
+    SetDoorOpenState(false, false);
+    GetWorldTimerManager().ClearTimer(DoorLockTimerHandle);
+    GetWorldTimerManager().SetTimer(
+        DoorLockTimerHandle,
+        this,
+        &AConfigurableDoorActor::UnlockDoor,
+        Duration,
+        false);
+}
+void AConfigurableDoorActor::UnlockDoor()
+{
+    bIsLockedClosed = false;
+    GetWorldTimerManager().ClearTimer(DoorLockTimerHandle);
 }
 
 void AConfigurableDoorActor::CaptureCurrentAsClosedState()
@@ -236,8 +305,7 @@ void AConfigurableDoorActor::CaptureCurrentAsClosedState()
 
     ClosedStateTransformComponent->SetRelativeLocationAndRotation(
         DoorMotionRootComponent->GetRelativeLocation(),
-        DoorMotionRootComponent->GetRelativeRotation()
-    );
+        DoorMotionRootComponent->GetRelativeRotation());
 
 #if WITH_EDITOR
     MarkPackageDirty();
@@ -251,18 +319,17 @@ void AConfigurableDoorActor::CaptureCurrentAsOpenState()
         return;
     }
 
-    #if WITH_EDITOR
-        OpenStateTransformComponent->Modify();
-    #endif
+#if WITH_EDITOR
+    OpenStateTransformComponent->Modify();
+#endif
 
     OpenStateTransformComponent->SetRelativeLocationAndRotation(
         DoorMotionRootComponent->GetRelativeLocation(),
-        DoorMotionRootComponent->GetRelativeRotation()
-    );
+        DoorMotionRootComponent->GetRelativeRotation());
 
-    #if WITH_EDITOR
-        MarkPackageDirty();
-    #endif
+#if WITH_EDITOR
+    MarkPackageDirty();
+#endif
 }
 
 void AConfigurableDoorActor::PreviewClosedState()
@@ -285,7 +352,7 @@ void AConfigurableDoorActor::PreviewOpenState()
     ApplyDoorStateInstant(true);
 }
 
-bool AConfigurableDoorActor::IsActorInInteractionRange(const AActor* InteractingActor) const
+bool AConfigurableDoorActor::IsActorInInteractionRange(const AActor *InteractingActor) const
 {
     if (!IsValid(InteractingActor) || !InteractionRangeComponent)
     {
@@ -295,15 +362,13 @@ bool AConfigurableDoorActor::IsActorInInteractionRange(const AActor* Interacting
     const FVector LocalActorLocation = InteractionRangeComponent->GetComponentTransform().InverseTransformPosition(InteractingActor->GetActorLocation());
     const FVector BoxExtent = InteractionRangeComponent->GetUnscaledBoxExtent();
 
-    return FMath::Abs(LocalActorLocation.X) <= BoxExtent.X
-        && FMath::Abs(LocalActorLocation.Y) <= BoxExtent.Y
-        && FMath::Abs(LocalActorLocation.Z) <= BoxExtent.Z;
+    return FMath::Abs(LocalActorLocation.X) <= BoxExtent.X && FMath::Abs(LocalActorLocation.Y) <= BoxExtent.Y && FMath::Abs(LocalActorLocation.Z) <= BoxExtent.Z;
 }
 
 bool AConfigurableDoorActor::CanActorInteractFromView(
-    const AActor* InteractingActor,
-    const FVector& ViewLocation,
-    const FVector& ViewDirection) const
+    const AActor *InteractingActor,
+    const FVector &ViewLocation,
+    const FVector &ViewDirection) const
 {
     if (!IsActorInInteractionRange(InteractingActor))
     {
@@ -311,8 +376,8 @@ bool AConfigurableDoorActor::CanActorInteractFromView(
     }
 
     const FVector DoorTargetLocation = DoorMeshComponent
-        ? DoorMeshComponent->Bounds.Origin
-        : GetActorLocation();
+                                           ? DoorMeshComponent->Bounds.Origin
+                                           : GetActorLocation();
     const FVector DirectionToDoor = (DoorTargetLocation - ViewLocation).GetSafeNormal();
     if (DirectionToDoor.IsNearlyZero())
     {

@@ -44,6 +44,11 @@ void UGhostNativeAnimInstance::NativeUpdateAnimation(float DeltaTime)
 
     UpdateActionLock(DeltaTime);
 
+    if (bIsSoulSucking && ActiveActionDynamicMontage && !Montage_IsPlaying(ActiveActionDynamicMontage))
+    {
+        Montage_Play(ActiveActionDynamicMontage, 1.f);
+    }
+
     if (bActionLocked)
     {
         return;
@@ -82,9 +87,7 @@ bool UGhostNativeAnimInstance::PlaySoulSuckAction()
         return false;
     }
 
-    const float LockDuration = GhostOwner->SoulSuckDuration > 0.f
-        ? GhostOwner->SoulSuckDuration
-        : GhostOwner->SoulSuckAnimation.LockDuration;
+    constexpr float InfiniteSoulSuckLockDuration = 86400.f;
 
     const bool bPlayed = PlayAction(
         GhostOwner->SoulSuckAnimation.Animation.Get(),
@@ -92,11 +95,18 @@ bool UGhostNativeAnimInstance::PlaySoulSuckAction()
         GhostOwner->ActionSlotName,
         GhostOwner->AnimationBlendInTime,
         GhostOwner->AnimationBlendOutTime,
-        LockDuration);
+        InfiniteSoulSuckLockDuration);
 
     bIsOpeningDoor = false;
     bIsSoulSucking = bPlayed;
     return bPlayed;
+}
+
+void UGhostNativeAnimInstance::StopSoulSuckAction()
+{
+    StopAction(0.1f);
+    bIsOpeningDoor = false;
+    bIsSoulSucking = false;
 }
 
 bool UGhostNativeAnimInstance::PlayKnockdownAction()
@@ -301,6 +311,7 @@ bool UGhostNativeAnimInstance::PlayAction(UAnimSequenceBase* Animation, UAnimMon
     if (Montage)
     {
         Montage_Play(Montage, 1.f);
+        ActiveActionDynamicMontage = Montage;
         StartActionLock(LockDuration > 0.f ? LockDuration : Montage->GetPlayLength());
         return true;
     }
@@ -316,7 +327,7 @@ bool UGhostNativeAnimInstance::PlayAction(UAnimSequenceBase* Animation, UAnimMon
         BlendInTime,
         BlendOutTime,
         1.f,
-        1);
+        LockDuration > 3600.f ? MAX_int32 : 1);
 
     if (!ActiveActionDynamicMontage)
     {
@@ -331,4 +342,21 @@ void UGhostNativeAnimInstance::StartActionLock(float LockDuration)
 {
     bActionLocked = LockDuration > 0.f;
     ActionLockTimeRemaining = FMath::Max(0.f, LockDuration);
+}
+
+void UGhostNativeAnimInstance::StopAction(float BlendOutTime)
+{
+    if (ActiveActionDynamicMontage)
+    {
+        Montage_Stop(BlendOutTime, ActiveActionDynamicMontage);
+        ActiveActionDynamicMontage = nullptr;
+    }
+    else
+    {
+        Montage_Stop(BlendOutTime);
+    }
+
+    bActionLocked = false;
+    ActionLockTimeRemaining = 0.f;
+    bHasPlayedLocomotion = false;
 }

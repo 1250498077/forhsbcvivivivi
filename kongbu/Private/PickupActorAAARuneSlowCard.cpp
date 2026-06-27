@@ -1,6 +1,5 @@
-#include "PickupActorAAARuneDisableCard.h"
+#include "PickupActorAAARuneSlowCard.h"
 
-#include "Components/CapsuleComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "GameFramework/Character.h"
@@ -9,60 +8,66 @@
 #include "MyAIController.h"
 #include "TimerManager.h"
 
-APickupActorAAARuneDisableCard::APickupActorAAARuneDisableCard()
+APickupActorAAARuneSlowCard::APickupActorAAARuneSlowCard()
 {
-    Tags.Add(FName("RuneDisableCard"));
+    Tags.Add(FName("RuneSlowCard"));
     Tags.Add(FName("Rune"));
-    Tags.Add(FName("Disable"));
+    Tags.Add(FName("Slow"));
 
-    FRuneCanvasPattern DefaultDisablePattern;
-    DefaultDisablePattern.PatternId = TEXT("Disable");
-    DefaultDisablePattern.NodeSequence = {
-        330, 331, 332, 333, 334, 335, 336, 337, 338, 339,
-        379, 419, 459, 499, 539,
-        538, 537, 536, 535, 534, 533, 532, 531, 530,
-        490, 450, 410, 370};
-    DisableCardExpectedSequences.Add(DefaultDisablePattern);
+    FRuneCanvasPattern DefaultsSlowPattern;
+    DefaultsSlowPattern.PatternId = TEXT("Slow");
+    DefaultsSlowPattern.NodeSequence = {
+        370, 371, 372, 373, 374, 375, 376, 377,
+        337, 297, 257, 217, 177, 137,
+        178, 219, 260, 301, 342, 383,
+        424, 465, 506, 547};
+    SlowCardExpectedSequences.Add(DefaultsSlowPattern);
 }
 
-void APickupActorAAARuneDisableCard::EndPlay(const EEndPlayReason::Type EndPlayReason)
+void APickupActorAAARuneSlowCard::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-    GetWorldTimerManager().ClearTimer(DisableDurationHandle);
-    ClearAttachedDisableEffect();
+    GetWorldTimerManager().ClearTimer(SlowDurationHandle);
+    ClearAttachedSlowEffect();
     Super::EndPlay(EndPlayReason);
 }
 
-void APickupActorAAARuneDisableCard::OnPickedUp()
+void APickupActorAAARuneSlowCard::OnPickedUp()
 {
-    GetWorldTimerManager().ClearTimer(DisableDurationHandle);
-    ClearAttachedDisableEffect();
+    GetWorldTimerManager().ClearTimer(SlowDurationHandle);
+    ClearAttachedSlowEffect();
     bAttachedToGhost = false;
     bCanAttachToGhostAfterThrow = false;
+    bHasCachedThrowSimilarityMultiplier = false;
+    CachedThrowSimilarityMultiplier = 0.f;
     Super::OnPickedUp();
 }
 
-void APickupActorAAARuneDisableCard::OnPutDown(FVector PlaceLocation, FRotator PlaceRotation)
+void APickupActorAAARuneSlowCard::OnPutDown(FVector PlaceLocation, FRotator PlaceRotation)
 {
-    GetWorldTimerManager().ClearTimer(DisableDurationHandle);
-    ClearAttachedDisableEffect();
+    GetWorldTimerManager().ClearTimer(SlowDurationHandle);
+    ClearAttachedSlowEffect();
     bAttachedToGhost = false;
     bCanAttachToGhostAfterThrow = false;
+    bHasCachedThrowSimilarityMultiplier = false;
+    CachedThrowSimilarityMultiplier = 0.f;
     Super::OnPutDown(PlaceLocation, PlaceRotation);
 }
 
-void APickupActorAAARuneDisableCard::OnThrown(FVector ThrowDirection, float ThrowForce)
+void APickupActorAAARuneSlowCard::OnThrown(FVector ThrowDirection, float ThrowForce)
 {
-    GetWorldTimerManager().ClearTimer(DisableDurationHandle);
-    ClearAttachedDisableEffect();
+    GetWorldTimerManager().ClearTimer(SlowDurationHandle);
+    ClearAttachedSlowEffect();
     bAttachedToGhost = false;
     bCanAttachToGhostAfterThrow = true;
+    CachedThrowSimilarityMultiplier = FMath::Clamp(GetCurrentCardSequenceSimilarityPercent() / 100.f, 0.f, 1.f);
+    bHasCachedThrowSimilarityMultiplier = true;
     Super::OnThrown(ThrowDirection, ThrowForce);
 }
 
-bool APickupActorAAARuneDisableCard::TryAttachToGhostZone(
+bool APickupActorAAARuneSlowCard::TryAttachToGhostZone(
     APawn *TargetPawn,
     AMyAIController *TargetController,
-    UPrimitiveComponent *AttachComponent)
+    USceneComponent *AttachComponent)
 {
     if (!bCanAttachToGhostAfterThrow || bAttachedToGhost || !IsValid(TargetPawn) || !IsValid(TargetController))
     {
@@ -73,7 +78,7 @@ bool APickupActorAAARuneDisableCard::TryAttachToGhostZone(
     return bAttachedToGhost;
 }
 
-bool APickupActorAAARuneDisableCard::TryHandleRuneCanvasThrownImpact(const FHitResult &Hit, UPrimitiveComponent *HitComponent)
+bool APickupActorAAARuneSlowCard::TryHandleRuneCanvasThrownImpact(const FHitResult &Hit, UPrimitiveComponent *HitComponent)
 {
     (void)HitComponent;
 
@@ -81,7 +86,11 @@ bool APickupActorAAARuneDisableCard::TryHandleRuneCanvasThrownImpact(const FHitR
     AMyAIController *TargetController = nullptr;
     if (!TryResolveGhost(Hit.GetActor(), TargetPawn, TargetController))
     {
-        return false;
+        UE_LOG(LogTemp, Verbose, TEXT("%s slow card hit non-ghost target %s and fizzled"),
+               *GetName(),
+               *GetNameSafe(Hit.GetActor()));
+        Destroy();
+        return true;
     }
 
     USceneComponent *AttachComponent = nullptr;
@@ -94,16 +103,16 @@ bool APickupActorAAARuneDisableCard::TryHandleRuneCanvasThrownImpact(const FHitR
     return true;
 }
 
-const TArray<int32> &APickupActorAAARuneDisableCard::GetExpectedNodeSequenceForCurrentCard() const
+const TArray<int32> &APickupActorAAARuneSlowCard::GetExpectedNodeSequenceForCurrentCard() const
 {
     static const TArray<int32> EmptySequence;
     const int32 CardResourceIndex = GetCurrentCardResourceIndex();
-    return DisableCardExpectedSequences.IsValidIndex(CardResourceIndex)
-               ? DisableCardExpectedSequences[CardResourceIndex].NodeSequence
+    return SlowCardExpectedSequences.IsValidIndex(CardResourceIndex)
+               ? SlowCardExpectedSequences[CardResourceIndex].NodeSequence
                : EmptySequence;
 }
 
-bool APickupActorAAARuneDisableCard::TryResolveGhost(
+bool APickupActorAAARuneSlowCard::TryResolveGhost(
     AActor *OtherActor,
     APawn *&OutPawn,
     AMyAIController *&OutController) const
@@ -133,13 +142,16 @@ bool APickupActorAAARuneDisableCard::TryResolveGhost(
     return true;
 }
 
-float APickupActorAAARuneDisableCard::ResolveScaledDisableDuration() const
+float APickupActorAAARuneSlowCard::ResolveScaledSlowDuration() const
 {
-    const float SimilarityMultiplier = FMath::Clamp(GetCurrentCardSequenceSimilarityPercent() / 100.f, 0.f, 1.f);
-    return FMath::Max(0.f, DisableDuration) * SimilarityMultiplier;
+    const float SimilarityMultiplier = bHasCachedThrowSimilarityMultiplier
+                                        ? FMath::Clamp(CachedThrowSimilarityMultiplier, 0.f, 1.f)
+                                        : FMath::Clamp(GetCurrentCardSequenceSimilarityPercent() / 100.f, 0.f, 1.f);
+
+    return FMath::Max(0.f, SlowDuration) * SimilarityMultiplier;
 }
 
-void APickupActorAAARuneDisableCard::AttachToGhost(
+void APickupActorAAARuneSlowCard::AttachToGhost(
     APawn *TargetPawn,
     AMyAIController *TargetController,
     USceneComponent *AttachComponent)
@@ -149,10 +161,10 @@ void APickupActorAAARuneDisableCard::AttachToGhost(
         return;
     }
 
-    const float ScaledDisableDuration = ResolveScaledDisableDuration();
-    if (ScaledDisableDuration <= UE_KINDA_SMALL_NUMBER)
+    const float ScaledSlowDuration = ResolveScaledSlowDuration();
+    if (ScaledSlowDuration <= UE_KINDA_SMALL_NUMBER)
     {
-        UE_LOG(LogTemp, Warning, TEXT("%s hit ghost %s but rune similarity is 0%%; disable card has no effect"),
+        UE_LOG(LogTemp, Warning, TEXT("%s hit ghost %s but rune similarity is 0%%; slow card has no effect"),
                *GetName(),
                *GetNameSafe(TargetPawn));
         Destroy();
@@ -171,7 +183,7 @@ void APickupActorAAARuneDisableCard::AttachToGhost(
     MeshComponent->SetGenerateOverlapEvents(false);
 
     USceneComponent *ResolvedAttachComponent = AttachComponent;
-    if (!IsValid(ResolvedAttachComponent))
+    if (IsValid(ResolvedAttachComponent))
     {
         ResolvedAttachComponent = TargetPawn->GetRootComponent();
         if (const ACharacter *CharacterTarget = Cast<ACharacter>(TargetPawn))
@@ -195,25 +207,26 @@ void APickupActorAAARuneDisableCard::AttachToGhost(
     bAttachedToGhost = true;
     AttachedController = TargetController;
     AttachedTargetActor = TargetPawn;
-    TargetController->ApplyAttachedDisableSource(this);
+    TargetController->ApplySpeedReductionSource(this, SpeedReductionAmount);
 
-    GetWorldTimerManager().ClearTimer(DisableDurationHandle);
+    GetWorldTimerManager().ClearTimer(SlowDurationHandle);
     GetWorldTimerManager().SetTimer(
-        DisableDurationHandle,
+        SlowDurationHandle,
         this,
-        &APickupActorAAARuneDisableCard::ExpireDisableCard,
-        ScaledDisableDuration,
+        &APickupActorAAARuneSlowCard::ExpireSlowCard,
+        ScaledSlowDuration,
         false);
 
-    UE_LOG(LogTemp, Log, TEXT("%s attached to ghost %s and disabled it for %.2fs (similarity %.1f%%, max %.2fs)"),
+    UE_LOG(LogTemp, Log, TEXT("%s attached to ghost %s and slowed it for %.2fs (similarity %.1f%%, max %.2fs, reduction %.1f)"),
            *GetName(),
            *GetNameSafe(TargetPawn),
-           ScaledDisableDuration,
+           ScaledSlowDuration,
            GetCurrentCardSequenceSimilarityPercent(),
-           FMath::Max(0.f, DisableDuration));
+           FMath::Max(0.f, SlowDuration),
+           FMath::Max(0.f, SpeedReductionAmount));
 }
 
-void APickupActorAAARuneDisableCard::ApplyGhostAttachPose(APawn *TargetPawn, USceneComponent *AttachComponent)
+void APickupActorAAARuneSlowCard::ApplyGhostAttachPose(APawn *TargetPawn, USceneComponent *AttachComponent)
 {
     if (!MeshComponent || !IsValid(TargetPawn) || !IsValid(AttachComponent))
     {
@@ -273,17 +286,17 @@ void APickupActorAAARuneDisableCard::ApplyGhostAttachPose(APawn *TargetPawn, USc
     AttachToComponent(AttachComponent, FAttachmentTransformRules::KeepWorldTransform);
 }
 
-void APickupActorAAARuneDisableCard::ExpireDisableCard()
+void APickupActorAAARuneSlowCard::ExpireSlowCard()
 {
-    ClearAttachedDisableEffect();
+    ClearAttachedSlowEffect();
     Destroy();
 }
 
-void APickupActorAAARuneDisableCard::ClearAttachedDisableEffect()
+void APickupActorAAARuneSlowCard::ClearAttachedSlowEffect()
 {
     if (AMyAIController *TargetController = AttachedController.Get())
     {
-        TargetController->RemoveAttachedDisableSource(this);
+        TargetController->RemoveSpeedReductionSource(this);
     }
 
     AttachedController.Reset();
