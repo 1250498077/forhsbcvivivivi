@@ -267,6 +267,20 @@ void AGhostSerpentVFXActor::UpdateBodyPose(float DeltaTime)
     const FTransform ActorTransform = GetActorTransform();
     const float RunningTime = GetWorld() ? GetWorld()->GetTimeSeconds() : FlightTime;
 
+    float AvailableTrailLength = 0.f;
+    for (int32 TrailIndex = 1; TrailIndex < TrailLocations.Num(); ++TrailIndex)
+    {
+        AvailableTrailLength += FVector::Dist(TrailLocations[TrailIndex - 1], TrailLocations[TrailIndex]);
+    }
+
+    const int32 BoneCount = BodyBoneNames.Num();
+    const float DesiredBodyLength = BodySegmentSpacing * FMath::Max(BoneCount - 1, 0);
+    const float DistanceScale = DesiredBodyLength > KINDA_SMALL_NUMBER
+        ? FMath::Min(1.f, AvailableTrailLength / DesiredBodyLength)
+        : 1.f;
+    const float DirectionSampleOffset = FMath::Max(BodySegmentSpacing * 0.35f, 8.f);
+    FVector PreviousBoneDirection = GetActorForwardVector();
+
     for (int32 BoneIndex = 0; BoneIndex < BodyBoneNames.Num(); ++BoneIndex)
     {
         const FName BoneName = BodyBoneNames[BoneIndex];
@@ -275,14 +289,21 @@ void AGhostSerpentVFXActor::UpdateBodyPose(float DeltaTime)
             continue;
         }
 
-        const float DistanceBack = BodySegmentSpacing * BoneIndex;
+        const float DistanceBack = BodySegmentSpacing * BoneIndex * DistanceScale;
         const FVector WorldLocation = GetTrailLocationAtDistance(DistanceBack);
-        FVector WorldDirection = GetTrailDirectionAtDistance(DistanceBack);
+        const float ForwardSampleDistance = FMath::Max(0.f, DistanceBack - DirectionSampleOffset);
+        const float BackwardSampleDistance = FMath::Min(AvailableTrailLength, DistanceBack + DirectionSampleOffset);
+        FVector WorldDirection = GetTrailLocationAtDistance(ForwardSampleDistance) - GetTrailLocationAtDistance(BackwardSampleDistance);
         if (WorldDirection.IsNearlyZero())
         {
-            WorldDirection = GetActorForwardVector();
+            WorldDirection = PreviousBoneDirection;
         }
-
+        else
+        {
+            PreviousBoneDirection = WorldDirection;
+        }
+        
+        PreviousBoneDirection = WorldDirection;
         const float Phase = RunningTime * WaveSpeed - BoneIndex * BonePhaseOffset;
         FRotator WorldRotation = WorldDirection.Rotation();
         WorldRotation.Pitch += FMath::Sin(Phase * 0.7f) * WavePitchAmplitudeDegrees;

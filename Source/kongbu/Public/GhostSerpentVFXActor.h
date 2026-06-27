@@ -70,7 +70,7 @@ public:
     float ArrivalRadius = 45.f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ghost Serpent|Flight")
-    bool bAutoStartOnBeginPlay = false;
+    bool bAutoStartOnBeginPlay = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ghost Serpent|Flight")
     bool bDestroyOnAbsorbed = true;
