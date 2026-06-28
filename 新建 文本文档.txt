@@ -1,3 +1,6 @@
-LogTemp: GhostSerpentVFXActor BuildDefaultBoneNamesIfNeeded: using existing bone list, count=10
-LogTemp: GhostSerpentVFXActor BuildDefaultBoneNamesIfNeeded: using existing bone list, count=10
-LogTemp: GhostSerpentVFXActor BeginPlay: Actor=youhun_C_UAID_74563CF626F2E7E802_1096826144, Mesh=None, BodyBoneNames=10, AutoStart=true, Autonomous=true
+LogTemp: GhostSerpentVFXActor InitializeMesh: adopted mesh from component: youhun_mesh_1
+LogTemp: GhostSerpentVFXActor BuildDefaultBoneNamesIfNeeded: using existing bone list, count=10, detected mesh spine bones=21
+LogTemp: Warning: GhostSerpentVFXActor BuildDefaultBoneNamesIfNeeded: existing BodyBoneNames only has 10 entries, so only those 10 bones will animate even though the mesh appears to have 21 sequential spine bones.
+LogTemp: GhostSerpentVFXActor BuildDefaultBoneNamesIfNeeded: using existing bone list, count=10, detected mesh spine bones=21
+LogTemp: Warning: GhostSerpentVFXActor BuildDefaultBoneNamesIfNeeded: existing BodyBoneNames only has 10 entries, so only those 10 bones will animate even though the mesh appears to have 21 sequential spine bones.
+LogTemp: GhostSerpentVFXActor BeginPlay: Actor=youhun_C_UAID_74563CF626F2E7E802_1096826144, Mesh=youhun_mesh_1, BodyBoneNames=10, AutoStart=true, Autonomous=true
