@@ -7,6 +7,7 @@
 #include "Engine/SkeletalMesh.h"
 #include "EngineUtils.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Logging/LogMacros.h"
 #include "GhostCharacter.h"
 #include "WomenCharacter.h"
 
@@ -14,6 +15,35 @@ namespace
 {
     constexpr int32 DefaultGeneratedBoneCount = 100;
     constexpr int32 GMaxTrailAllocationCount = 240;
+    constexpr int32 MaxAutoDetectedSpineBoneCount = 512;
+
+    bool IsSequentialSpineBoneNameValid(const UPoseableMeshComponent* MeshComponent, int32 BoneIndex)
+    {
+        if (!MeshComponent || BoneIndex <= 0)
+        {
+            return false;
+        }
+
+        const FName TwoDigitName(*FString::Printf(TEXT("spine_%02d"), BoneIndex));
+        if (MeshComponent->GetBoneIndex(TwoDigitName) != INDEX_NONE)
+        {
+            return true;
+        }
+
+        const FName PlainName(*FString::Printf(TEXT("spine_%d"), BoneIndex));
+        return MeshComponent->GetBoneIndex(PlainName) != INDEX_NONE;
+    }
+
+    FName MakeSequentialSpineBoneName(const UPoseableMeshComponent* MeshComponent, int32 BoneIndex)
+    {
+        const FName TwoDigitName(*FString::Printf(TEXT("spine_%02d"), BoneIndex));
+        if (MeshComponent && MeshComponent->GetBoneIndex(TwoDigitName) != INDEX_NONE)
+        {
+            return TwoDigitName;
+        }
+
+        return FName(*FString::Printf(TEXT("spine_%d"), BoneIndex));
+    }
 
     FVector CubicBezier(const FVector &P0, const FVector &P1, const FVector &P2, const FVector &P3, float Alpha)
     {
@@ -174,10 +204,28 @@ void AGhostSerpentVFXActor::BuildDefaultBoneNamesIfNeeded()
         return;
     }
 
-    BodyBoneNames.Reserve(DefaultGeneratedBoneCount);
-    for (int32 BoneIndex = 1; BoneIndex <= DefaultGeneratedBoneCount; ++BoneIndex)
+    // BodyBoneNames.Reserve(DefaultGeneratedBoneCount);
+    // for (int32 BoneIndex = 1; BoneIndex <= DefaultGeneratedBoneCount; ++BoneIndex)
+    int32 BoneCountToGenerate = DefaultGeneratedBoneCount;
+    if (SerpentMeshComponent)
     {
-        BodyBoneNames.Add(FName(*FString::Printf(TEXT("spine_%02d"), BoneIndex)));
+        BoneCountToGenerate = 0;
+        for (int32 BoneIndex = 1; BoneIndex <= MaxAutoDetectedSpineBoneCount; ++BoneIndex)
+        {
+            if (!IsSequentialSpineBoneNameValid(SerpentMeshComponent, BoneIndex))
+            {
+                break;
+            }
+
+            ++BoneCountToGenerate;
+        }
+    }
+
+    BoneCountToGenerate = FMath::Max(BoneCountToGenerate, 1);
+    BodyBoneNames.Reserve(BoneCountToGenerate);
+    for (int32 BoneIndex = 1; BoneIndex <= BoneCountToGenerate; ++BoneIndex)
+    {
+        BodyBoneNames.Add(MakeSequentialSpineBoneName(SerpentMeshComponent, BoneIndex));
     }
 }
 
@@ -310,6 +358,7 @@ void AGhostSerpentVFXActor::UpdateBodyPose(float DeltaTime)
     }
 
     FVector PreviousBoneDirection = HeadForwardDirection;
+    int32 ValidBoneCount = 0;
 
     for (int32 BoneIndex = 0; BoneIndex < BodyBoneNames.Num(); ++BoneIndex)
     {
@@ -318,6 +367,7 @@ void AGhostSerpentVFXActor::UpdateBodyPose(float DeltaTime)
         {
             continue;
         }
+        ++ValidBoneCount;
 
         const FVector WorldLocation = RuntimeBoneWorldLocations[BoneIndex];
         FVector WorldDirection = FVector::ZeroVector;
@@ -343,29 +393,21 @@ void AGhostSerpentVFXActor::UpdateBodyPose(float DeltaTime)
         }
 
         PreviousBoneDirection = WorldDirection;
-        // const float Phase = RunningTime * WaveSpeed - BoneIndex * BonePhaseOffset;
-        // const float NormalizedBoneIndex = BoneCount > 1
-        //     ? static_cast<float>(BoneIndex) / static_cast<float>(BoneCount - 1)
-        //     : 1.f;
-        // const float WaveStartAlpha = 0.95f;
-        // const float WaveBlendAlpha = FMath::GetMappedRangeValueClamped(FVector2D(WaveStartAlpha, 1.f), FVector2D(0.f, 1.f), NormalizedBoneIndex);
-        // const float WaveBlend = FMath::Square(WaveBlendAlpha);
-
         FRotator WorldRotation = WorldDirection.Rotation();
-        // WorldRotation.Pitch += FMath::Sin(Phase * 0.7f) * WavePitchAmplitudeDegrees * WaveBlend;
-        // WorldRotation.Yaw += FMath::Sin(Phase) * WaveYawAmplitudeDegrees * WaveBlend;
-        // WorldRotation.Roll += FMath::Cos(Phase) * WaveRollAmplitudeDegrees * WaveBlend;
         WorldRotation += BoneRotationOffset;
-        if (BoneIndex == 0)
-        {
-            WorldRotation += HeadBoneRotationOffset;
-        }
+        WorldRotation += HeadBoneRotationOffset;
+
 
         const FVector ComponentLocation = ActorTransform.InverseTransformPosition(WorldLocation);
         const FRotator ComponentRotation = ActorTransform.InverseTransformRotation(WorldRotation.Quaternion()).Rotator();
 
         SerpentMeshComponent->SetBoneLocationByName(BoneName, ComponentLocation, EBoneSpaces::ComponentSpace);
         SerpentMeshComponent->SetBoneRotationByName(BoneName, ComponentRotation, EBoneSpaces::ComponentSpace);
+    }
+
+    if (ValidBoneCount < BodyBoneNames.Num())
+    {
+        UE_LOG(LogTemp, Verbose, TEXT("GhostSerpentVFXActor valid bones: %d / %d. Unmatched bone names are skipped."), ValidBoneCount, BodyBoneNames.Num());
     }
 }
 
