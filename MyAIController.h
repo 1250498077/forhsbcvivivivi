@@ -156,6 +156,7 @@ void AGhostSerpentVFXActor::StartFlightFromLocation(FVector RiftLocation, AActor
     FlightStartLocation = RiftLocation;
     SpawnOriginLocation = RiftLocation;
     SetActorLocation(FlightStartLocation);
+    LastHeadMoveDirection = GetActorForwardVector();
     FlightTime = 0.f;
     BehaviorState = EGhostSerpentBehaviorState::FlyingToGhost;
     bIsFlying = IsValid(TargetActor);
@@ -176,6 +177,7 @@ void AGhostSerpentVFXActor::StartAutonomousFromLocation(FVector RiftLocation)
     FlightStartLocation = RiftLocation;
     SpawnOriginLocation = RiftLocation;
     SetActorLocation(RiftLocation);
+    LastHeadMoveDirection = GetActorForwardVector();
     FlightTime = 0.f;
     bIsFlying = true;
     BehaviorState = EGhostSerpentBehaviorState::Wandering;
@@ -295,7 +297,13 @@ void AGhostSerpentVFXActor::UpdateFlight(float DeltaTime)
 
     FlightTime += DeltaTime;
     const float Alpha = FlightDuration <= KINDA_SMALL_NUMBER ? 1.f : FMath::Clamp(FlightTime / FlightDuration, 0.f, 1.f);
+    const FVector PreviousHeadLocation = GetActorLocation();
     const FVector HeadLocation = EvaluateHeadLocation(Alpha);
+    const FVector HeadMoveDelta = HeadLocation - PreviousHeadLocation;
+    if (!HeadMoveDelta.IsNearlyZero())
+    {
+        LastHeadMoveDirection = HeadMoveDelta.GetSafeNormal();
+    }
 
     SetActorLocation(HeadLocation);
     UpdateTrail(HeadLocation);
@@ -385,7 +393,11 @@ void AGhostSerpentVFXActor::UpdateBodyPose(float DeltaTime)
 
         const FVector WorldLocation = RuntimeBoneWorldLocations[BoneIndex];
         FVector WorldDirection = FVector::ZeroVector;
-        if (BoneIndex + 1 < RuntimeBoneWorldLocations.Num())
+        if (BoneIndex == 0 && !LastHeadMoveDirection.IsNearlyZero())
+        {
+            WorldDirection = LastHeadMoveDirection;
+        }
+        else if (BoneIndex + 1 < RuntimeBoneWorldLocations.Num())
         {
             WorldDirection = RuntimeBoneWorldLocations[BoneIndex] - RuntimeBoneWorldLocations[BoneIndex + 1];
         }
@@ -713,6 +725,7 @@ void AGhostSerpentVFXActor::MoveSerpentToward(const FVector &DesiredLocation, fl
     }
 
     const FVector Direction = ToDesired / Distance;
+    LastHeadMoveDirection = Direction;
     const float Step = FMath::Min(Distance, FMath::Max(0.f, Speed) * DeltaTime);
     FVector NewLocation = CurrentLocation + Direction * Step;
 
