@@ -83,12 +83,12 @@ void AGhostSerpentVFXActor::BeginPlay()
 
     InitializeMesh();
     BuildDefaultBoneNamesIfNeeded();
-    UE_LOG(LogTemp, Log, TEXT("GhostSerpentVFXActor BeginPlay: Actor=%s, Mesh=%s, BodyBoneNames=%d, AutoStart=%s, Autonomous=%s"),
-        *GetName(),
-        SerpentSkeletalMesh ? *SerpentSkeletalMesh->GetName() : TEXT("None"),
-        BodyBoneNames.Num(),
-        bAutoStartOnBeginPlay ? TEXT("true") : TEXT("false"),
-        bUseAutonomousBehavior ? TEXT("true") : TEXT("false"));
+    // UE_LOG(LogTemp, Log, TEXT("GhostSerpentVFXActor BeginPlay: Actor=%s, Mesh=%s, RuntimeBodyBoneNames=%d, AutoStart=%s, Autonomous=%s"),
+    // *GetName(),
+    // SerpentSkeletalMesh ? *SerpentSkeletalMesh->GetName() : TEXT("None"),
+    // RuntimeBodyBoneNames.Num(),
+    // bAutoStartOnBeginPlay ? TEXT("true") : TEXT("false"),
+    // bUseAutonomousBehavior ? TEXT("true") : TEXT("false"));
 
     if (bAutoStartOnBeginPlay)
     {
@@ -198,7 +198,25 @@ void AGhostSerpentVFXActor::StopFlight()
 
 void AGhostSerpentVFXActor::InitializeMesh()
 {
-    if (SerpentMeshComponent && SerpentSkeletalMesh)
+    if (!SerpentMeshComponent)
+    {
+        return;
+    }
+
+    if (!SerpentSkeletalMesh)
+    {
+        if (USkeletalMesh *ExistingMesh = Cast<USkeletalMesh>(SerpentMeshComponent->GetSkinnedAsset()))
+        {
+            SerpentSkeletalMesh = ExistingMesh;
+            UE_LOG(LogTemp, Log, TEXT("GhostSerpentVFXActor InitializeMesh: adopted mesh from component: %s"), *ExistingMesh->GetName());
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("GhostSerpentVFXActor InitializeMesh: no SerpentSkeletalMesh assigned and PoseableMeshComponent has no mesh asset."));
+        }
+    }
+
+    if (SerpentSkeletalMesh)
     {
         SerpentMeshComponent->SetSkinnedAssetAndUpdate(SerpentSkeletalMesh);
     }
@@ -206,18 +224,10 @@ void AGhostSerpentVFXActor::InitializeMesh()
 
 void AGhostSerpentVFXActor::BuildDefaultBoneNamesIfNeeded()
 {
-    if (!BodyBoneNames.IsEmpty())
+    RuntimeBodyBoneNames.Reset();
+    int32 AvailableSequentialBoneCount = 0;
+    if (SerpentMeshComponent && SerpentMeshComponent->GetSkinnedAsset())
     {
-        UE_LOG(LogTemp, Log, TEXT("GhostSerpentVFXActor BuildDefaultBoneNamesIfNeeded: using existing bone list, count=%d"), BodyBoneNames.Num());
-        return;
-    }
-
-    // BodyBoneNames.Reserve(DefaultGeneratedBoneCount);
-    // for (int32 BoneIndex = 1; BoneIndex <= DefaultGeneratedBoneCount; ++BoneIndex)
-    int32 BoneCountToGenerate = DefaultGeneratedBoneCount;
-    if (SerpentMeshComponent)
-    {
-        BoneCountToGenerate = 0;
         for (int32 BoneIndex = 1; BoneIndex <= MaxAutoDetectedSpineBoneCount; ++BoneIndex)
         {
             if (!IsSequentialSpineBoneNameValid(SerpentMeshComponent, BoneIndex))
@@ -225,18 +235,27 @@ void AGhostSerpentVFXActor::BuildDefaultBoneNamesIfNeeded()
                 break;
             }
 
-            ++BoneCountToGenerate;
+            ++AvailableSequentialBoneCount;
         }
     }
 
-    BoneCountToGenerate = FMath::Max(BoneCountToGenerate, 1);
-    BodyBoneNames.Reserve(BoneCountToGenerate);
-    for (int32 BoneIndex = 1; BoneIndex <= BoneCountToGenerate; ++BoneIndex)
+
+    // BodyBoneNames.Reserve(DefaultGeneratedBoneCount);
+    // for (int32 BoneIndex = 1; BoneIndex <= DefaultGeneratedBoneCount; ++BoneIndex)
+    int32 BoneCountToGenerate = DefaultGeneratedBoneCount;
+    if (AvailableSequentialBoneCount > 0)
     {
-        BodyBoneNames.Add(MakeSequentialSpineBoneName(SerpentMeshComponent, BoneIndex));
+        BoneCountToGenerate = AvailableSequentialBoneCount;
     }
 
-    UE_LOG(LogTemp, Log, TEXT("GhostSerpentVFXActor BuildDefaultBoneNamesIfNeeded: generated %d bones"), BodyBoneNames.Num());
+    BoneCountToGenerate = FMath::Max(BoneCountToGenerate, 1);
+    RuntimeBodyBoneNames.Reserve(BoneCountToGenerate);
+    for (int32 BoneIndex = 1; BoneIndex <= BoneCountToGenerate; ++BoneIndex)
+    {
+        RuntimeBodyBoneNames.Add(MakeSequentialSpineBoneName(SerpentMeshComponent, BoneIndex));
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("GhostSerpentVFXActor BuildDefaultBoneNamesIfNeeded: generated %d bones"), RuntimeBodyBoneNames.Num());
 }
 
 void AGhostSerpentVFXActor::GeneratePathControlPoints()
@@ -310,7 +329,7 @@ void AGhostSerpentVFXActor::UpdateTrail(const FVector &HeadLocation)
         TrailLocations.Insert(HeadLocation, 0);
     }
 
-    const float TotalBodyLength = FMath::Max(0.f, (BodyBoneNames.Num() - 1) * BodySegmentSpacing);
+    const float TotalBodyLength = FMath::Max(0.f, (RuntimeBodyBoneNames.Num() - 1) * BodySegmentSpacing);
     const int32 RequiredTrailSampleCount = FMath::Clamp(
         FMath::CeilToInt(TotalBodyLength / TrailSampleMinDistance) + 8,
         2,
@@ -326,7 +345,7 @@ void AGhostSerpentVFXActor::UpdateBodyPose(float DeltaTime)
 {
     (void)DeltaTime;
 
-    if (!SerpentMeshComponent || BodyBoneNames.IsEmpty())
+    if (!SerpentMeshComponent || RuntimeBodyBoneNames.IsEmpty())
     {
         return;
     }
@@ -334,7 +353,7 @@ void AGhostSerpentVFXActor::UpdateBodyPose(float DeltaTime)
     const FTransform ActorTransform = GetActorTransform();
     const float RunningTime = GetWorld() ? GetWorld()->GetTimeSeconds() : FlightTime;
 
-    const int32 BoneCount = BodyBoneNames.Num();
+    const int32 BoneCount = RuntimeBodyBoneNames.Num();
     FVector HeadForwardDirection = GetActorForwardVector();
     if (TrailLocations.Num() > 1)
     {
@@ -359,9 +378,9 @@ void AGhostSerpentVFXActor::UpdateBodyPose(float DeltaTime)
     FVector PreviousBoneDirection = HeadForwardDirection;
     int32 ValidBoneCount = 0;
 
-    for (int32 BoneIndex = 0; BoneIndex < BodyBoneNames.Num(); ++BoneIndex)
+    for (int32 BoneIndex = 0; BoneIndex < RuntimeBodyBoneNames.Num(); ++BoneIndex)
     {
-        const FName BoneName = BodyBoneNames[BoneIndex];
+        const FName BoneName = RuntimeBodyBoneNames[BoneIndex];
         if (BoneName.IsNone() || SerpentMeshComponent->GetBoneIndex(BoneName) == INDEX_NONE)
         {
             continue;
@@ -369,21 +388,24 @@ void AGhostSerpentVFXActor::UpdateBodyPose(float DeltaTime)
         ++ValidBoneCount;
 
         const FVector WorldLocation = RuntimeBoneWorldLocations[BoneIndex];
-        FVector WorldDirection = GetTrailDirectionAtDistance(BodySegmentSpacing * BoneIndex);
-        if (BoneIndex == 0 && WorldDirection.IsNearlyZero())
-        {
-            WorldDirection = HeadForwardDirection;
-        }
 
-        if (WorldDirection.IsNearlyZero())
+        FVector WorldDirection = FVector::ZeroVector;
+        if (BoneCount > 1)
         {
-            WorldDirection = PreviousBoneDirection;
+            if (BoneIndex == 0)
+            {
+                WorldDirection = RuntimeBoneWorldLocations[0] - RuntimeBoneWorldLocations[1];
+            }
+            else if (BoneIndex == BoneCount - 1)
+            {
+                WorldDirection = RuntimeBoneWorldLocations[BoneIndex - 1] - RuntimeBoneWorldLocations[BoneIndex];
+            }
+            else
+            {
+                WorldDirection = RuntimeBoneWorldLocations[BoneIndex - 1] - RuntimeBoneWorldLocations[BoneIndex + 1];
+            }
         }
-        else
-        {
-            PreviousBoneDirection = WorldDirection;
-        }
-
+        
         PreviousBoneDirection = WorldDirection;
         FRotator WorldRotation = WorldDirection.Rotation();
         WorldRotation += BoneRotationOffset;
@@ -396,9 +418,7 @@ void AGhostSerpentVFXActor::UpdateBodyPose(float DeltaTime)
         SerpentMeshComponent->SetBoneRotationByName(BoneName, ComponentRotation, EBoneSpaces::ComponentSpace);
     }
 
-     UE_LOG(LogTemp, Warning, TEXT("GhostSerpentVFXActor valid bones: %d / %d. Unmatched bone names are skipped."), ValidBoneCount, BodyBoneNames.Num());
-
-    if (ValidBoneCount < BodyBoneNames.Num())
+    if (ValidBoneCount < RuntimeBodyBoneNames.Num())
     {
         UE_LOG(LogTemp, Warning, TEXT("GhostSerpentVFXActor valid bones: %d / %d. Unmatched bone names are skipped."), ValidBoneCount, BodyBoneNames.Num());
     }
