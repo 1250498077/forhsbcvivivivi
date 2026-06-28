@@ -1,76 +1,8 @@
-===== [4/5] Building Project =====
-Using bundled DotNet SDK version: 8.0.412 win-x64
-Running UnrealBuildTool: dotnet "..\..\Engine\Binaries\DotNET\UnrealBuildTool\UnrealBuildTool.dll" kongbuEditor Win64 Development -project=D:\game\kongbu\kongbu.uproject -waitmutex
-Log file: C:\Users\mwh\AppData\Local\UnrealBuildTool\Log.txt
-Creating makefile for kongbuEditor (no existing makefile)
-UHT compiled-in object format Default
-Parsing headers for kongbuEditor
-  Running Internal UnrealHeaderTool D:\game\kongbu\kongbu.uproject D:\game\kongbu\Intermediate\Build\Win64\kongbuEditor\Development\kongbuEditor.uhtmanifest -WarningsAsErrors -installed
-UHT processed kongbuEditor in 0.818744 seconds (84 files written)
-Building kongbuEditor...
-Using Visual Studio 2022 14.44.35222 toolchain (C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Tools\MSVC\14.44.35207) and Windows 10.0.22621.0 SDK (C:\Program Files (x86)\Windows Kits\10).
-Determining max actions to execute in parallel (20 physical cores, 28 logical cores)
-  Executing up to 20 processes, one per physical core
-  Requested 1.5 GB memory per action, 18.11 GB available: limiting max parallel actions to 12
-Using Unreal Build Accelerator local executor to run 14 action(s)
-  Storage capacity 40Gb
----- Starting trace: 260627_182522 ----
-UbaServer - Listening on 0.0.0.0:1345
-[1/14] Resource Default.rc2
-[2/14] Compile [x64] SharedPCH.UnrealEd.Project.ValApi.ValExpApi.Cpp20.cpp
-[3/14] Compile [x64] Module.kongbu.4.cpp
-[4/14] Compile [x64] Module.kongbu.5.cpp
-[5/14] Compile [x64] Module.kongbu.1.cpp
-[6/14] Compile [x64] Module.kongbu.3.cpp
-[7/14] Compile [x64] Module.kongbu.9.cpp
-[8/14] Compile [x64] Module.kongbu.6.cpp
-[9/14] Compile [x64] Module.kongbu.2.cpp
-D:\game\kongbu\Source\kongbu\Public\GhostSerpentVFXActor.h(238,13): warning C4263: “FVector AGhostSerpentVFXActor::GetTargetLocation(void) const”: 成员函数不重写任何基类虚拟成员函数
-    FVector GetTargetLocation() const;
-            ^
-D:\game\kongbu\Source\kongbu\Public\GhostSerpentVFXActor.h(26,18): warning C4264: “FVector AActor::GetTargetLocation(AActor *) const”: 不重写基“AActor”中的虚拟成员函数；函数被隐藏
-class KONGBU_API AGhostSerpentVFXActor : public AActor
-                 ^
-D:\app\xuhuan\UE_5.7\Engine\Source\Runtime\Engine\Classes\GameFramework\Actor.h(3750,29): note: 参见“AActor::GetTargetLocation”的声明
-        ENGINE_API virtual FVector GetTargetLocation(AActor* RequestedBy = nullptr) const;
-                                   ^
-D:\app\xuhuan\UE_5.7\Engine\Source\Runtime\Engine\Classes\GameFramework\Actor.h(256,7): note: 参见“AActor”的声明
-class AActor : public UObject
-      ^
-[10/14] Compile [x64] Module.kongbu.7.cpp
-D:\game\kongbu\Source\kongbu\Public\GhostSerpentVFXActor.h(238,13): warning C4263: “FVector AGhostSerpentVFXActor::GetTargetLocation(void) const”: 成员函数不重写任何基类虚拟成员函数
-    FVector GetTargetLocation() const;
-            ^
-D:\game\kongbu\Source\kongbu\Public\GhostSerpentVFXActor.h(26,18): warning C4264: “FVector AActor::GetTargetLocation(AActor *) const”: 不重写基“AActor”中的虚拟成员函数；函数被隐藏
-class KONGBU_API AGhostSerpentVFXActor : public AActor
-                 ^
-D:\app\xuhuan\UE_5.7\Engine\Source\Runtime\Engine\Classes\GameFramework\Actor.h(3750,29): note: 参见“AActor::GetTargetLocation”的声明
-        ENGINE_API virtual FVector GetTargetLocation(AActor* RequestedBy = nullptr) const;
-                                   ^
-D:\app\xuhuan\UE_5.7\Engine\Source\Runtime\Engine\Classes\GameFramework\Actor.h(256,7): note: 参见“AActor”的声明
-class AActor : public UObject
-      ^
-D:\game\kongbu\Source\kongbu\Private\GhostSerpentVFXActor.cpp(123,31): error C2039: "ResetBoneTransforms": 不是 "UPoseableMeshComponent" 的成员
-        SerpentMeshComponent->ResetBoneTransforms();
-                              ^
-D:\app\xuhuan\UE_5.7\Engine\Source\Runtime\Engine\Classes\Components\PoseableMeshComponent.h(17,7): note: 参见“UPoseableMeshComponent”的声明
-class UPoseableMeshComponent : public USkinnedMeshComponent
-      ^
-D:\game\kongbu\Source\kongbu\Private\GhostSerpentVFXActor.cpp(147,31): error C2039: "ResetBoneTransforms": 不是 "UPoseableMeshComponent" 的成员
-        SerpentMeshComponent->ResetBoneTransforms();
-                              ^
-D:\app\xuhuan\UE_5.7\Engine\Source\Runtime\Engine\Classes\Components\PoseableMeshComponent.h(17,7): note: 参见“UPoseableMeshComponent”的声明
-class UPoseableMeshComponent : public USkinnedMeshComponent
-      ^
-D:\game\kongbu\Source\kongbu\Private\GhostSerpentVFXActor.cpp(161,78): error C2039: "GetSkeletalMeshAsset": 不是 "UPoseableMeshComponent" 的成员
-    if (SerpentMeshComponent && SerpentSkeletalMesh && SerpentMeshComponent->GetSkeletalMeshAsset() != SerpentSkeletalMesh)
-                                                                             ^
-D:\app\xuhuan\UE_5.7\Engine\Source\Runtime\Engine\Classes\Components\PoseableMeshComponent.h(17,7): note: 参见“UPoseableMeshComponent”的声明
-class UPoseableMeshComponent : public USkinnedMeshComponent
-      ^
-D:\game\kongbu\Source\kongbu\Private\GhostSerpentVFXActor.cpp(253,32): error C2065: “MaxTrailLocationCount”: 未声明的标识符
-    if (TrailLocations.Num() > MaxTrailLocationCount)
-                               ^
-D:\game\kongbu\Source\kongbu\Private\GhostSerpentVFXActor.cpp(255,31): error C2065: “MaxTrailLocationCount”: 未声明的标识符
-        TrailLocations.SetNum(MaxTrailLocationCount);
-                              ^
+LogTemp: Warning: GhostSerpentVFXActor valid bones: 10 / 10. Unmatched bone names are skipped.
+LogTemp: Warning: GhostSerpentVFXActor valid bones: 10 / 10. Unmatched bone names are skipped.
+LogTemp: Warning: GhostSerpentVFXActor valid bones: 10 / 10. Unmatched bone names are skipped.
+LogTemp: Warning: GhostSerpentVFXActor valid bones: 10 / 10. Unmatched bone names are skipped.
+LogTemp: Warning: GhostSerpentVFXActor valid bones: 10 / 10. Unmatched bone names are skipped.
+LogTemp: Warning: GhostSerpentVFXActor valid bones: 10 / 10. Unmatched bone names are skipped.
+LogTemp: Warning: GhostSerpentVFXActor valid bones: 10 / 10. Unmatched bone names are skipped.
+LogTemp: Warning: GhostSerpentVFXActor valid bones: 10 / 10. Unmatched bone names are skipped.
