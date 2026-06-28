@@ -53,6 +53,10 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ghost Serpent|Mesh")
     FRotator BoneRotationOffset = FRotator::ZeroRotator;
 
+    // 有些头骨和脊椎骨的本地轴不一致，这里只修正第一个骨骼的朝向偏移。 [0,0,90]
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ghost Serpent|Mesh")
+    FRotator HeadBoneRotationOffset = FRotator::ZeroRotator;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ghost Serpent|Target")
     TObjectPtr<AActor> TargetActor = nullptr;
 
@@ -208,6 +212,7 @@ private:
     FVector PathControlPointA = FVector::ZeroVector;
     FVector PathControlPointB = FVector::ZeroVector;
     TArray<FVector> TrailLocations;
+    TArray<FVector> RuntimeBoneWorldLocations;
     float OrbitAngleDegrees = 0.f;
     TObjectPtr<AWomenCharacter> OrbitTargetPlayer = nullptr;
     TObjectPtr<AGhostCharacter> AbsorbTargetGhost = nullptr;

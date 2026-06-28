@@ -12,18 +12,24 @@
 
 namespace
 {
-    constexpr int32 DefaultGeneratedBoneCount = 10;
+    constexpr int32 DefaultGeneratedBoneCount = 100;
     constexpr int32 GMaxTrailAllocationCount = 240;
 
-    FVector CubicBezier(const FVector& P0, const FVector& P1, const FVector& P2, const FVector& P3, float Alpha)
+    FVector CubicBezier(const FVector &P0, const FVector &P1, const FVector &P2, const FVector &P3, float Alpha)
     {
         const float T = FMath::Clamp(Alpha, 0.f, 1.f);
         const float OneMinusT = 1.f - T;
-        return OneMinusT * OneMinusT * OneMinusT * P0
-             + 3.f * OneMinusT * OneMinusT * T * P1
-             + 3.f * OneMinusT * T * T * P2
-             + T * T * T * P3;
+        return OneMinusT * OneMinusT * OneMinusT * P0 + 3.f * OneMinusT * OneMinusT * T * P1 + 3.f * OneMinusT * T * T * P2 + T * T * T * P3;
     }
+
+    FVector CatmullRomInterpolate(const FVector &P0, const FVector &P1, const FVector &P2, const FVector &P3, float Alpha)
+    {
+        const float T = FMath::Clamp(Alpha, 0.f, 1.f);
+        const float T2 = T * T;
+        const float T3 = T2 * T;
+        return 0.5f * ((2.f * P1) + (-P0 + P2) * T + (2.f * P0 - 5.f * P1 + 4.f * P2 - P3) * T2 + (-P0 + 3.f * P1 - 3.f * P2 + P3) * T3);
+    }
+
 }
 
 AGhostSerpentVFXActor::AGhostSerpentVFXActor()
@@ -60,7 +66,7 @@ void AGhostSerpentVFXActor::BeginPlay()
     }
 }
 
-void AGhostSerpentVFXActor::OnConstruction(const FTransform& Transform)
+void AGhostSerpentVFXActor::OnConstruction(const FTransform &Transform)
 {
     Super::OnConstruction(Transform);
     InitializeMesh();
@@ -94,19 +100,19 @@ void AGhostSerpentVFXActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
     Super::EndPlay(EndPlayReason);
 }
 
-void AGhostSerpentVFXActor::SetSerpentMesh(USkeletalMesh* NewMesh)
+void AGhostSerpentVFXActor::SetSerpentMesh(USkeletalMesh *NewMesh)
 {
     SerpentSkeletalMesh = NewMesh;
     InitializeMesh();
     BuildDefaultBoneNamesIfNeeded();
 }
 
-void AGhostSerpentVFXActor::StartFlight(AActor* NewTargetActor, FName NewTargetSocketName)
+void AGhostSerpentVFXActor::StartFlight(AActor *NewTargetActor, FName NewTargetSocketName)
 {
     StartFlightFromLocation(GetActorLocation(), NewTargetActor, NewTargetSocketName);
 }
 
-void AGhostSerpentVFXActor::StartFlightFromLocation(FVector RiftLocation, AActor* NewTargetActor, FName NewTargetSocketName)
+void AGhostSerpentVFXActor::StartFlightFromLocation(FVector RiftLocation, AActor *NewTargetActor, FName NewTargetSocketName)
 {
     TargetActor = NewTargetActor;
     if (!NewTargetSocketName.IsNone())
@@ -124,7 +130,6 @@ void AGhostSerpentVFXActor::StartFlightFromLocation(FVector RiftLocation, AActor
     GeneratePathControlPoints();
     ResetTrail();
     UpdateTrail(FlightStartLocation);
-
 }
 
 void AGhostSerpentVFXActor::StartAutonomousFromLocation(FVector RiftLocation)
@@ -144,7 +149,6 @@ void AGhostSerpentVFXActor::StartAutonomousFromLocation(FVector RiftLocation)
     ResetTrail();
     UpdateTrail(RiftLocation);
     ChooseNewWanderTarget();
-
 }
 
 void AGhostSerpentVFXActor::StopFlight()
@@ -195,10 +199,8 @@ void AGhostSerpentVFXActor::GeneratePathControlPoints()
     const FVector Up = FVector::CrossProduct(Forward, Right).GetSafeNormal();
 
     const float SideSign = FMath::RandBool() ? 1.f : -1.f;
-    const FVector RandomA = Right * FMath::FRandRange(-PathRandomRadius, PathRandomRadius)
-                          + Up * FMath::FRandRange(0.f, PathRandomRadius);
-    const FVector RandomB = Right * FMath::FRandRange(-PathRandomRadius, PathRandomRadius) * SideSign
-                          + Up * FMath::FRandRange(-PathRandomRadius * 0.35f, PathRandomRadius);
+    const FVector RandomA = Right * FMath::FRandRange(-PathRandomRadius, PathRandomRadius) + Up * FMath::FRandRange(0.f, PathRandomRadius);
+    const FVector RandomB = Right * FMath::FRandRange(-PathRandomRadius, PathRandomRadius) * SideSign + Up * FMath::FRandRange(-PathRandomRadius * 0.35f, PathRandomRadius);
 
     PathControlPointA = FlightStartLocation + ToTarget * 0.28f + FVector::UpVector * PathLift + RandomA;
     PathControlPointB = FlightStartLocation + ToTarget * 0.72f + FVector::UpVector * (PathLift * 0.45f) + RandomB;
@@ -207,6 +209,7 @@ void AGhostSerpentVFXActor::GeneratePathControlPoints()
 void AGhostSerpentVFXActor::ResetTrail()
 {
     TrailLocations.Reset();
+    RuntimeBoneWorldLocations.Reset();
 }
 
 void AGhostSerpentVFXActor::UpdateFlight(float DeltaTime)
@@ -242,7 +245,7 @@ void AGhostSerpentVFXActor::UpdateFlight(float DeltaTime)
     }
 }
 
-void AGhostSerpentVFXActor::UpdateTrail(const FVector& HeadLocation)
+void AGhostSerpentVFXActor::UpdateTrail(const FVector &HeadLocation)
 {
     if (TrailLocations.IsEmpty() || FVector::DistSquared(TrailLocations[0], HeadLocation) > FMath::Square(2.f))
     {
@@ -267,19 +270,46 @@ void AGhostSerpentVFXActor::UpdateBodyPose(float DeltaTime)
     const FTransform ActorTransform = GetActorTransform();
     const float RunningTime = GetWorld() ? GetWorld()->GetTimeSeconds() : FlightTime;
 
-    float AvailableTrailLength = 0.f;
-    for (int32 TrailIndex = 1; TrailIndex < TrailLocations.Num(); ++TrailIndex)
+    const int32 BoneCount = BodyBoneNames.Num();
+    FVector HeadForwardDirection = GetActorForwardVector();
+    if (TrailLocations.Num() > 1)
     {
-        AvailableTrailLength += FVector::Dist(TrailLocations[TrailIndex - 1], TrailLocations[TrailIndex]);
+        const FVector TrailForward = TrailLocations[0] - TrailLocations[1];
+        if (!TrailForward.IsNearlyZero())
+        {
+            HeadForwardDirection = TrailForward.GetSafeNormal();
+        }
     }
 
-    const int32 BoneCount = BodyBoneNames.Num();
-    const float DesiredBodyLength = BodySegmentSpacing * FMath::Max(BoneCount - 1, 0);
-    const float DistanceScale = DesiredBodyLength > KINDA_SMALL_NUMBER
-        ? FMath::Min(1.f, AvailableTrailLength / DesiredBodyLength)
-        : 1.f;
-    const float DirectionSampleOffset = FMath::Max(BodySegmentSpacing * 0.35f, 8.f);
-    FVector PreviousBoneDirection = GetActorForwardVector();
+    if (RuntimeBoneWorldLocations.Num() != BoneCount)
+    {
+        RuntimeBoneWorldLocations.SetNum(BoneCount);
+        const FVector HeadLocation = GetActorLocation();
+        for (int32 BoneIndex = 0; BoneIndex < BoneCount; ++BoneIndex)
+        {
+            // 原图此行末尾被截断，根据逻辑补全为 * BoneIndex
+            RuntimeBoneWorldLocations[BoneIndex] = HeadLocation - HeadForwardDirection * BodySegmentSpacing * BoneIndex;
+        }
+    }
+
+    RuntimeBoneWorldLocations[0] = GetActorLocation();
+    for (int32 BoneIndex = 1; BoneIndex < BoneCount; ++BoneIndex)
+    {
+        const FVector PreviousBoneLocation = RuntimeBoneWorldLocations[BoneIndex - 1];
+        FVector SegmentDirection = RuntimeBoneWorldLocations[BoneIndex] - PreviousBoneLocation;
+        if (SegmentDirection.IsNearlyZero())
+        {
+            SegmentDirection = -HeadForwardDirection;
+        }
+        else
+        {
+            SegmentDirection = SegmentDirection.GetSafeNormal();
+        }
+
+        RuntimeBoneWorldLocations[BoneIndex] = PreviousBoneLocation + SegmentDirection * BodySegmentSpacing;
+    }
+
+    FVector PreviousBoneDirection = HeadForwardDirection;
 
     for (int32 BoneIndex = 0; BoneIndex < BodyBoneNames.Num(); ++BoneIndex)
     {
@@ -289,11 +319,20 @@ void AGhostSerpentVFXActor::UpdateBodyPose(float DeltaTime)
             continue;
         }
 
-        const float DistanceBack = BodySegmentSpacing * BoneIndex * DistanceScale;
-        const FVector WorldLocation = GetTrailLocationAtDistance(DistanceBack);
-        const float ForwardSampleDistance = FMath::Max(0.f, DistanceBack - DirectionSampleOffset);
-        const float BackwardSampleDistance = FMath::Min(AvailableTrailLength, DistanceBack + DirectionSampleOffset);
-        FVector WorldDirection = GetTrailLocationAtDistance(ForwardSampleDistance) - GetTrailLocationAtDistance(BackwardSampleDistance);
+        const FVector WorldLocation = RuntimeBoneWorldLocations[BoneIndex];
+        FVector WorldDirection = FVector::ZeroVector;
+        if (BoneCount > 1)
+        {
+            if (BoneIndex == 0)
+            {
+                WorldDirection = HeadForwardDirection;
+            }
+            else
+            {
+                WorldDirection = RuntimeBoneWorldLocations[BoneIndex - 1] - RuntimeBoneWorldLocations[BoneIndex];
+            }
+        }
+
         if (WorldDirection.IsNearlyZero())
         {
             WorldDirection = PreviousBoneDirection;
@@ -302,14 +341,25 @@ void AGhostSerpentVFXActor::UpdateBodyPose(float DeltaTime)
         {
             PreviousBoneDirection = WorldDirection;
         }
-        
+
         PreviousBoneDirection = WorldDirection;
-        const float Phase = RunningTime * WaveSpeed - BoneIndex * BonePhaseOffset;
+        // const float Phase = RunningTime * WaveSpeed - BoneIndex * BonePhaseOffset;
+        // const float NormalizedBoneIndex = BoneCount > 1
+        //     ? static_cast<float>(BoneIndex) / static_cast<float>(BoneCount - 1)
+        //     : 1.f;
+        // const float WaveStartAlpha = 0.95f;
+        // const float WaveBlendAlpha = FMath::GetMappedRangeValueClamped(FVector2D(WaveStartAlpha, 1.f), FVector2D(0.f, 1.f), NormalizedBoneIndex);
+        // const float WaveBlend = FMath::Square(WaveBlendAlpha);
+
         FRotator WorldRotation = WorldDirection.Rotation();
-        WorldRotation.Pitch += FMath::Sin(Phase * 0.7f) * WavePitchAmplitudeDegrees;
-        WorldRotation.Yaw   += FMath::Sin(Phase) * WaveYawAmplitudeDegrees;
-        WorldRotation.Roll  += FMath::Cos(Phase) * WaveRollAmplitudeDegrees;
+        // WorldRotation.Pitch += FMath::Sin(Phase * 0.7f) * WavePitchAmplitudeDegrees * WaveBlend;
+        // WorldRotation.Yaw += FMath::Sin(Phase) * WaveYawAmplitudeDegrees * WaveBlend;
+        // WorldRotation.Roll += FMath::Cos(Phase) * WaveRollAmplitudeDegrees * WaveBlend;
         WorldRotation += BoneRotationOffset;
+        if (BoneIndex == 0)
+        {
+            WorldRotation += HeadBoneRotationOffset;
+        }
 
         const FVector ComponentLocation = ActorTransform.InverseTransformPosition(WorldLocation);
         const FRotator ComponentRotation = ActorTransform.InverseTransformRotation(WorldRotation.Quaternion()).Rotator();
@@ -345,7 +395,7 @@ FVector AGhostSerpentVFXActor::GetSerpentTargetLocation() const
 
     if (!TargetSocketName.IsNone())
     {
-        if (const USkeletalMeshComponent* TargetMesh = TargetActor->FindComponentByClass<USkeletalMeshComponent>())
+        if (const USkeletalMeshComponent *TargetMesh = TargetActor->FindComponentByClass<USkeletalMeshComponent>())
         {
             if (TargetMesh->DoesSocketExist(TargetSocketName))
             {
@@ -379,9 +429,7 @@ FVector AGhostSerpentVFXActor::EvaluateHeadLocation(float Alpha) const
 
     const float SpiralPhase = T * SpiralFrequency * UE_TWO_PI + FlightTime * 2.f;
     const float FadeInOut = FMath::Sin(T * UE_PI);
-    const FVector SpiralOffset = (Right * FMath::Cos(SpiralPhase) + Up * FMath::Sin(SpiralPhase))
-                               * SpiralAmplitude
-                               * FadeInOut;
+    const FVector SpiralOffset = (Right * FMath::Cos(SpiralPhase) + Up * FMath::Sin(SpiralPhase)) * SpiralAmplitude * FadeInOut;
 
     return BaseLocation + SpiralOffset;
 }
@@ -408,9 +456,18 @@ FVector AGhostSerpentVFXActor::GetTrailLocationAtDistance(float DistanceBack) co
         if (AccumulatedDistance + SegmentLength >= DistanceBack)
         {
             const float SegmentAlpha = SegmentLength <= KINDA_SMALL_NUMBER
-                                     ? 0.f
-                                     : (DistanceBack - AccumulatedDistance) / SegmentLength;
-            return FMath::Lerp(NewerPoint, OlderPoint, SegmentAlpha);
+                                           ? 0.f
+                                           : (DistanceBack - AccumulatedDistance) / SegmentLength;
+            const int32 P0Index = FMath::Max(Index - 2, 0);
+            const int32 P1Index = Index - 1;
+            const int32 P2Index = Index;
+            const int32 P3Index = FMath::Min(Index + 1, TrailLocations.Num() - 1);
+            return CatmullRomInterpolate(
+                TrailLocations[P0Index],
+                TrailLocations[P1Index],
+                TrailLocations[P2Index],
+                TrailLocations[P3Index],
+                SegmentAlpha);
         }
 
         AccumulatedDistance += SegmentLength;
@@ -430,7 +487,7 @@ void AGhostSerpentVFXActor::UpdateAutonomousBehavior(float DeltaTime)
 {
     FlightTime += DeltaTime;
 
-    if (AGhostCharacter* VisibleGhost = FindVisibleGhost())
+    if (AGhostCharacter *VisibleGhost = FindVisibleGhost())
     {
         AbsorbTargetGhost = VisibleGhost;
         OrbitTargetPlayer = nullptr;
@@ -439,7 +496,7 @@ void AGhostSerpentVFXActor::UpdateAutonomousBehavior(float DeltaTime)
     }
     else if (BehaviorState != EGhostSerpentBehaviorState::OrbitingPlayer)
     {
-        if (AWomenCharacter* VisiblePlayer = FindVisiblePlayer())
+        if (AWomenCharacter *VisiblePlayer = FindVisiblePlayer())
         {
             OrbitTargetPlayer = VisiblePlayer;
             OrbitAngleDegrees = FMath::FRandRange(0.f, 360.f);
@@ -449,16 +506,16 @@ void AGhostSerpentVFXActor::UpdateAutonomousBehavior(float DeltaTime)
 
     switch (BehaviorState)
     {
-        case EGhostSerpentBehaviorState::FlyingToGhost:
-            UpdateFlyToGhostBehavior(DeltaTime);
-            break;
-        case EGhostSerpentBehaviorState::OrbitingPlayer:
-            UpdateOrbitPlayer(DeltaTime);
-            break;
-        case EGhostSerpentBehaviorState::Wandering:
-        default:
-            UpdateWander(DeltaTime);
-            break;
+    case EGhostSerpentBehaviorState::FlyingToGhost:
+        UpdateFlyToGhostBehavior(DeltaTime);
+        break;
+    case EGhostSerpentBehaviorState::OrbitingPlayer:
+        UpdateOrbitPlayer(DeltaTime);
+        break;
+    case EGhostSerpentBehaviorState::Wandering:
+    default:
+        UpdateWander(DeltaTime);
+        break;
     }
 }
 
@@ -476,7 +533,7 @@ void AGhostSerpentVFXActor::UpdateWander(float DeltaTime)
 
 void AGhostSerpentVFXActor::UpdateOrbitPlayer(float DeltaTime)
 {
-    AWomenCharacter* Player = OrbitTargetPlayer;
+    AWomenCharacter *Player = OrbitTargetPlayer;
     if (!IsValid(Player) || FVector::DistSquared(GetActorLocation(), Player->GetActorLocation()) > FMath::Square(PlayerForgetRadius))
     {
         OrbitTargetPlayer = nullptr;
@@ -508,7 +565,7 @@ void AGhostSerpentVFXActor::UpdateOrbitPlayer(float DeltaTime)
 
 void AGhostSerpentVFXActor::UpdateFlyToGhostBehavior(float DeltaTime)
 {
-    AGhostCharacter* Ghost = AbsorbTargetGhost;
+    AGhostCharacter *Ghost = AbsorbTargetGhost;
     if (!IsValid(Ghost))
     {
         Ghost = Cast<AGhostCharacter>(TargetActor.Get());
@@ -530,7 +587,7 @@ void AGhostSerpentVFXActor::UpdateFlyToGhostBehavior(float DeltaTime)
     }
 }
 
-void AGhostSerpentVFXActor::MoveSerpentToward(const FVector& DesiredLocation, float Speed, float DeltaTime)
+void AGhostSerpentVFXActor::MoveSerpentToward(const FVector &DesiredLocation, float Speed, float DeltaTime)
 {
     const FVector CurrentLocation = GetActorLocation();
     const FVector ToDesired = DesiredLocation - CurrentLocation;
@@ -546,14 +603,13 @@ void AGhostSerpentVFXActor::MoveSerpentToward(const FVector& DesiredLocation, fl
     FVector NewLocation = CurrentLocation + Direction * Step;
 
     const FVector Side = FVector::CrossProduct(FVector::UpVector, Direction).GetSafeNormal();
-    NewLocation += (Side * FMath::Sin(FlightTime * WaveSpeed) * 18.f
-                  + FVector::UpVector * FMath::Sin(FlightTime * 3.1f) * 12.f) * DeltaTime;
+    NewLocation += (Side * FMath::Sin(FlightTime * WaveSpeed) * 18.f + FVector::UpVector * FMath::Sin(FlightTime * 3.1f) * 12.f) * DeltaTime;
 
     SetActorLocation(NewLocation);
     UpdateTrail(NewLocation);
 }
 
-void AGhostSerpentVFXActor::FinishGhostAbsorption(AGhostCharacter* GhostTarget)
+void AGhostSerpentVFXActor::FinishGhostAbsorption(AGhostCharacter *GhostTarget)
 {
     if (!IsValid(GhostTarget))
     {
@@ -566,19 +622,19 @@ void AGhostSerpentVFXActor::FinishGhostAbsorption(AGhostCharacter* GhostTarget)
     FinishAbsorption();
 }
 
-AWomenCharacter* AGhostSerpentVFXActor::FindVisiblePlayer() const
+AWomenCharacter *AGhostSerpentVFXActor::FindVisiblePlayer() const
 {
     if (!GetWorld())
     {
         return nullptr;
     }
 
-    AWomenCharacter* BestPlayer = nullptr;
+    AWomenCharacter *BestPlayer = nullptr;
     float BestDistanceSquared = TNumericLimits<float>::Max();
 
     for (TActorIterator<AWomenCharacter> It(GetWorld()); It; ++It)
     {
-        AWomenCharacter* Candidate = *It;
+        AWomenCharacter *Candidate = *It;
         if (!IsValid(Candidate) || !CanSeeActor(Candidate, PlayerSenseRadius))
         {
             continue;
@@ -595,19 +651,19 @@ AWomenCharacter* AGhostSerpentVFXActor::FindVisiblePlayer() const
     return BestPlayer;
 }
 
-AGhostCharacter* AGhostSerpentVFXActor::FindVisibleGhost() const
+AGhostCharacter *AGhostSerpentVFXActor::FindVisibleGhost() const
 {
     if (!GetWorld())
     {
         return nullptr;
     }
 
-    AGhostCharacter* BestGhost = nullptr;
+    AGhostCharacter *BestGhost = nullptr;
     float BestDistanceSquared = TNumericLimits<float>::Max();
 
     for (TActorIterator<AGhostCharacter> It(GetWorld()); It; ++It)
     {
-        AGhostCharacter* Candidate = *It;
+        AGhostCharacter *Candidate = *It;
         if (!IsValid(Candidate) || !CanSeeActor(Candidate, GhostSenseRadius))
         {
             continue;
@@ -624,7 +680,7 @@ AGhostCharacter* AGhostSerpentVFXActor::FindVisibleGhost() const
     return BestGhost;
 }
 
-bool AGhostSerpentVFXActor::CanSeeActor(const AActor* Candidate, float SenseRadius) const
+bool AGhostSerpentVFXActor::CanSeeActor(const AActor *Candidate, float SenseRadius) const
 {
     if (!IsValid(Candidate) || SenseRadius <= 0.f)
     {
@@ -663,7 +719,7 @@ void AGhostSerpentVFXActor::ChooseNewWanderTarget()
     WanderTargetLocation.Z = SpawnOriginLocation.Z + FMath::FRandRange(-120.f, 180.f);
 }
 
-void AGhostSerpentVFXActor::ApplyPlayerSlow(AWomenCharacter* Player)
+void AGhostSerpentVFXActor::ApplyPlayerSlow(AWomenCharacter *Player)
 {
     if (!IsValid(Player))
     {
@@ -675,14 +731,14 @@ void AGhostSerpentVFXActor::ApplyPlayerSlow(AWomenCharacter* Player)
     {
         ClearPlayerSlow();
         SlowedPlayer = Player;
-        if (UCharacterMovementComponent* MovementComponent = Player->GetCharacterMovement())
+        if (UCharacterMovementComponent *MovementComponent = Player->GetCharacterMovement())
         {
             CachedSlowedPlayerWalkSpeed = MovementComponent->MaxWalkSpeed;
             bHasCachedSlowedPlayerWalkSpeed = true;
         }
     }
 
-    if (UCharacterMovementComponent* MovementComponent = Player->GetCharacterMovement())
+    if (UCharacterMovementComponent *MovementComponent = Player->GetCharacterMovement())
     {
         const float BaseSpeed = bHasCachedSlowedPlayerWalkSpeed ? CachedSlowedPlayerWalkSpeed : MovementComponent->MaxWalkSpeed;
         MovementComponent->MaxWalkSpeed = FMath::Min(MovementComponent->MaxWalkSpeed, BaseSpeed * PlayerSlowMultiplier);
@@ -693,7 +749,7 @@ void AGhostSerpentVFXActor::ClearPlayerSlow()
 {
     if (IsValid(SlowedPlayer) && bHasCachedSlowedPlayerWalkSpeed)
     {
-        if (UCharacterMovementComponent* MovementComponent = SlowedPlayer->GetCharacterMovement())
+        if (UCharacterMovementComponent *MovementComponent = SlowedPlayer->GetCharacterMovement())
         {
             MovementComponent->MaxWalkSpeed = CachedSlowedPlayerWalkSpeed;
         }
