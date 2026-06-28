@@ -18,7 +18,7 @@ namespace
     constexpr int32 MaxAutoDetectedSpineBoneCount = 512;
     constexpr float TrailSampleMinDistance = 2.f;
 
-    bool IsSequentialSpineBoneNameValid(const UPoseableMeshComponent *MeshComponent, int32 BoneIndex)
+    bool IsSequentialSpineBoneNameValid(const UPoseableMeshComponent* MeshComponent, int32 BoneIndex)
     {
         if (!MeshComponent || BoneIndex <= 0)
         {
@@ -388,24 +388,21 @@ void AGhostSerpentVFXActor::UpdateBodyPose(float DeltaTime)
         ++ValidBoneCount;
 
         const FVector WorldLocation = RuntimeBoneWorldLocations[BoneIndex];
-
-        FVector WorldDirection = FVector::ZeroVector;
-        if (BoneCount > 1)
+        FVector WorldDirection = GetTrailDirectionAtDistance(BodySegmentSpacing * BoneIndex);
+        if (BoneIndex == 0 && WorldDirection.IsNearlyZero())
         {
-            if (BoneIndex == 0)
-            {
-                WorldDirection = RuntimeBoneWorldLocations[0] - RuntimeBoneWorldLocations[1];
-            }
-            else if (BoneIndex == BoneCount - 1)
-            {
-                WorldDirection = RuntimeBoneWorldLocations[BoneIndex - 1] - RuntimeBoneWorldLocations[BoneIndex];
-            }
-            else
-            {
-                WorldDirection = RuntimeBoneWorldLocations[BoneIndex - 1] - RuntimeBoneWorldLocations[BoneIndex + 1];
-            }
+            WorldDirection = HeadForwardDirection;
         }
-        
+
+        if (WorldDirection.IsNearlyZero())
+        {
+            WorldDirection = PreviousBoneDirection;
+        }
+        else
+        {
+            PreviousBoneDirection = WorldDirection;
+        }
+
         PreviousBoneDirection = WorldDirection;
         FRotator WorldRotation = WorldDirection.Rotation();
         WorldRotation += BoneRotationOffset;
