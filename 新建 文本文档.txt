@@ -1,17 +1,21 @@
-LogEOSSDK: LogEOS: Updating Product SDK Config, Time: 2009.475464
-LogEOSSDK: LogEOS: SDK Config Product Update Request Completed - No Change
-LogEOSSDK: LogEOS: ScheduleNextSDKConfigDataUpdate - Time: 2009.728516, Update Interval: 343.591431
+LogRenderer: Recreating Persistent SBTs due to initializer changes: 
+        NumShaderSlotsPerGeometrySegment changed: current: 1 - new: 2
+        NumGeometrySegments changed: current: 0 - new: 768
+LogRenderer: Recreating Persistent SBTs due to initializer changes: 
+        NumGeometrySegments changed: current: 768 - new: 1280
+Cmd: DebugManager.CycleToPreviousColumn
 LogTemp: Warning: TryPickup call  HeldActor=nullptr
-LogTemp: Warning: Attach held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 to third-person mesh: component=CharacterMesh0 socket=RightSocket relativeLocation=X=0.000 Y=0.000 Z=0.000 relativeRotation=P=0.000000 Y=0.000000 R=0.000000 worldLocation=X=3560.106 Y=148.319 Z=130.194 hidden=false
-LogTemp: Warning: FirstPerson held socket runtime check: pawn=X=3581.325 Y=141.258 Z=148.250 camera=X=3473.092 Y=67.149 Z=192.250 mesh=X=3372.868 Y=-1.476 Z=145.927 meshRot=P=-0.000000 Y=-55.599998 R=69.125000 meshDist=130.0 socket=X=3437.219 Y=55.907 Z=154.851 socketDist=53.0 skeletalMesh=women_shuangshou_mesh anim=ABP_first_women_C_0 actorRepMove=false
-LogTemp: Warning: Attach held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 to first-person mesh: component=FirstPersonMesh socket=RightSocket relativeLocation=X=2.000 Y=-9.000 Z=4.000 relativeRotation=P=-175.000000 Y=20.000000 R=-60.000000 worldLocation=X=3277.909 Y=-925.518 Z=301.224 hidden=false
+LogTemp: Warning: Attach held item shizijia_lantu_C_UAID_74563CF626F2F0EC02_1772068951 to third-person mesh: component=CharacterMesh0 socket=RightSocket relativeLocation=X=0.000 Y=0.000 Z=0.000 relativeRotation=P=0.000000 Y=0.000000 R=0.000000 worldLocation=X=2543.735 Y=-2.327 Z=130.107 hidden=false
+LogTemp: Warning: Attach held item shizijia_lantu_C_UAID_74563CF626F2F0EC02_1772068951 to first-person HoldPoint: component=HoldPoint socket=<none> relativeLocation=X=-3.000 Y=-5.000 Z=2.000 relativeRotation=P=-50.000000 Y=285.000000 R=60.000000 worldLocation=X=2453.049 Y=-20.960 Z=145.856 hidden=false
+LogTemp: Warning: ʰ  : shizijia_lantu_C_UAID_74563CF626F2F0EC02_1772068951
+LogTemp: Warning: Throw Impulse: X=1215.702 Y=-301.149 Z=503.863
+Cmd: DebugManager.CycleToPreviousColumn
+LogTemp: Warning: TryPickup call  HeldActor=nullptr
+LogTemp: Warning: Attach held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 to third-person mesh: component=CharacterMesh0 socket=RightSocket relativeLocation=X=0.000 Y=0.000 Z=0.000 relativeRotation=P=0.000000 Y=0.000000 R=0.000000 worldLocation=X=3563.529 Y=148.825 Z=130.568 hidden=false
+LogTemp: Warning: Attach held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 to first-person HoldPoint: component=HoldPoint socket=<none> relativeLocation=X=2.000 Y=-9.000 Z=4.000 relativeRotation=P=-175.000000 Y=20.000000 R=-60.000000 worldLocation=X=3484.804 Y=108.044 Z=140.820 hidden=false
 LogTemp: Warning: ʰ  : card_suo_C_UAID_74563CF626F2D8EC02_2015054727
-LogTemp: Warning: Held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 hidden. TooFar=true Distance=1017.2 HitActor=None HitComponent=None CameraLoc=X=3473.092 Y=67.149 Z=192.250 HeldLoc=X=3274.652 Y=-924.586 Z=301.224
+LogTemp: card_suo_C_UAID_74563CF626F2D8EC02_2015054727 rune canvas attached by trace to StaticMeshActor_UAID_74563CF626F2F0EA02_1925251845
 Cmd: DebugManager.CycleToPreviousColumn
 LogSlate: Updating window title bar state: overlay mode, drag disabled, window buttons hidden, title bar hidden
 LogWorld: BeginTearingDown for /Game/level/Level_Market/UEDPIE_0_Market_level
 LogCrowdFollowing: Warning: Unable to find RecastNavMesh instance while trying to create UCrowdManager instance
-LogWorld: UWorld::CleanupWorld for Market_level, bSessionEnded=true, bCleanupResources=true
-LogSlate: InvalidateAllWidgets triggered.  All widgets were invalidated
-LogWorldPartition: UWorldPartition::Uninitialize : World = /Game/level/Level_Market/UEDPIE_0_Market_level.Market_level
-LogPlayLevel: Display: Shutting down PIE online subsystems
