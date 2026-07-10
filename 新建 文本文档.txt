@@ -1,6 +1,23 @@
-LogTemp: GhostSerpentVFXActor InitializeMesh: adopted mesh from component: youhun_mesh_1
-LogTemp: GhostSerpentVFXActor BuildDefaultBoneNamesIfNeeded: using existing bone list, count=10, detected mesh spine bones=21
-LogTemp: Warning: GhostSerpentVFXActor BuildDefaultBoneNamesIfNeeded: existing BodyBoneNames only has 10 entries, so only those 10 bones will animate even though the mesh appears to have 21 sequential spine bones.
-LogTemp: GhostSerpentVFXActor BuildDefaultBoneNamesIfNeeded: using existing bone list, count=10, detected mesh spine bones=21
-LogTemp: Warning: GhostSerpentVFXActor BuildDefaultBoneNamesIfNeeded: existing BodyBoneNames only has 10 entries, so only those 10 bones will animate even though the mesh appears to have 21 sequential spine bones.
-LogTemp: GhostSerpentVFXActor BeginPlay: Actor=youhun_C_UAID_74563CF626F2E7E802_1096826144, Mesh=youhun_mesh_1, BodyBoneNames=10, AutoStart=true, Autonomous=true
+LogTemp: Warning: TryPickup call  HeldActor=nullptr
+LogTemp: Warning: Attach held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 to third-person mesh: component=CharacterMesh0 socket=RightSocket relativeLocation=X=0.000 Y=0.000 Z=0.000 relativeRotation=P=0.000000 Y=0.000000 R=0.000000 worldLocation=X=3567.167 Y=166.723 Z=130.596 hidden=false
+LogTemp: Warning: Attach held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 to first-person mesh: component=FirstPersonMesh socket=RightSocket relativeLocation=X=2.000 Y=-9.000 Z=4.000 relativeRotation=P=-175.000000 Y=20.000000 R=-60.000000 worldLocation=X=3146.838 Y=-856.721 Z=323.218 hidden=false
+LogTemp: Warning: ʰ  : card_suo_C_UAID_74563CF626F2D8EC02_2015054727
+LogTemp: Warning: Held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 hidden by anti-wall trace. HitActor=StaticMeshActor_UAID_74563CF626F253EB02_1342998264 HitComponent=StaticMeshComponent0 PawnLoc=X=3587.201 Y=158.148 Z=148.250 HeldLoc=X=3187.430 Y=-867.241 Z=3.424
+Cmd: DebugManager.CycleToPreviousColumn
+LogTemp: Warning: Held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 shown again: anti-wall trace is clear
+LogTemp: Warning: Held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 hidden by anti-wall trace. HitActor=StaticMeshActor_UAID_74563CF626F2C2E802_2088339632 HitComponent=StaticMeshComponent0 PawnLoc=X=3771.487 Y=221.683 Z=148.250 HeldLoc=X=3944.989 Y=-710.235 Z=196.372
+LogTemp: Warning: Held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 shown again: anti-wall trace is clear
+LogTemp: Warning: Held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 hidden by anti-wall trace. HitActor=StaticMeshActor_UAID_74563CF626F254EB02_2002827448 HitComponent=StaticMeshComponent0 PawnLoc=X=3849.467 Y=166.898 Z=148.250 HeldLoc=X=2938.461 Y=432.760 Z=242.308
+LogTemp: Warning: Held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 shown again: anti-wall trace is clear
+LogTemp: Warning: Held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 hidden by anti-wall trace. HitActor=StaticMeshActor_UAID_74563CF626F254EB02_2002827448 HitComponent=StaticMeshComponent0 PawnLoc=X=3659.175 Y=66.364 Z=148.250 HeldLoc=X=2934.933 Y=671.812 Z=314.045
+LogTemp: Warning: Held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 shown again: anti-wall trace is clear
+LogTemp: Warning: Held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 hidden by anti-wall trace. HitActor=StaticMeshActor_UAID_74563CF626F254EB02_2002827448 HitComponent=StaticMeshComponent0 PawnLoc=X=3647.550 Y=62.962 Z=148.250 HeldLoc=X=2824.658 Y=518.847 Z=343.251
+LogTemp: Warning: Held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 shown again: anti-wall trace is clear
+LogTemp: Warning: Held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 hidden by anti-wall trace. HitActor=StaticMeshActor_UAID_74563CF626F254EB02_2002827448 HitComponent=StaticMeshComponent0 PawnLoc=X=3579.669 Y=20.076 Z=148.250 HeldLoc=X=2752.127 Y=462.321 Z=361.940
+LogTemp: Warning: Held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 shown again: anti-wall trace is clear
+LogTemp: Warning: Held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 hidden by anti-wall trace. HitActor=StaticMeshActor_UAID_74563CF626F254EB02_2002827448 HitComponent=StaticMeshComponent0 PawnLoc=X=2829.594 Y=-485.120 Z=148.250 HeldLoc=X=2482.960 Y=381.235 Z=388.518
+LogTemp: Warning: Held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 shown again: anti-wall trace is clear
+LogTemp: Warning: Held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 hidden by anti-wall trace. HitActor=StaticMeshActor_UAID_74563CF626F26DEB02_1174362839 HitComponent=StaticMeshComponent0 PawnLoc=X=2615.514 Y=-483.581 Z=148.250 HeldLoc=X=2277.333 Y=388.560 Z=381.766
+LogTemp: Warning: Held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 shown again: anti-wall trace is clear
+LogSlate: Updating window title bar state: overlay mode, drag disabled, window buttons hidden, title bar hidden
+LogWorld: BeginTearingDown for /Game/level/Level_Market/UEDPIE_0_Market_level
