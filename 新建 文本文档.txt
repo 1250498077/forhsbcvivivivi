@@ -1,21 +1,17 @@
-Cmd: DebugManager.CycleToPreviousColumn
-LogHttp: Warning: HTTP request timed out after 3.00 seconds URL=https://www.google.com/generate_204
-Cmd: DebugManager.CycleToPreviousColumn
+LogEOSSDK: LogEOS: Updating Product SDK Config, Time: 2009.475464
+LogEOSSDK: LogEOS: SDK Config Product Update Request Completed - No Change
+LogEOSSDK: LogEOS: ScheduleNextSDKConfigDataUpdate - Time: 2009.728516, Update Interval: 343.591431
 LogTemp: Warning: TryPickup call  HeldActor=nullptr
-LogTemp: Warning: Attach held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 to third-person mesh: component=CharacterMesh0 socket=RightSocket relativeLocation=X=0.000 Y=0.000 Z=0.000 relativeRotation=P=0.000000 Y=0.000000 R=0.000000 worldLocation=X=3599.116 Y=125.146 Z=130.354 hidden=false
-LogTemp: Warning: FirstPerson held socket runtime check: pawn=X=3592.267 Y=103.297 Z=148.250 camera=X=3461.873 Y=89.132 Z=192.250 mesh=X=3341.834 Y=76.092 Z=144.078 meshRot=P=-0.000000 Y=-83.799999 R=68.250001 meshDist=130.0 socket=X=3425.517 Y=96.238 Z=154.307 socketDist=53.0 skeletalMesh=women_shuangshou_mesh anim=ABP_first_women_C_0 actorRepMove=true
-LogTemp: Warning: Attach held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 to first-person mesh: component=FirstPersonMesh socket=RightSocket relativeLocation=X=2.000 Y=-9.000 Z=4.000 relativeRotation=P=-175.000000 Y=20.000000 R=-60.000000 worldLocation=X=2819.201 Y=-693.646 Z=290.187 hidden=false
+LogTemp: Warning: Attach held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 to third-person mesh: component=CharacterMesh0 socket=RightSocket relativeLocation=X=0.000 Y=0.000 Z=0.000 relativeRotation=P=0.000000 Y=0.000000 R=0.000000 worldLocation=X=3560.106 Y=148.319 Z=130.194 hidden=false
+LogTemp: Warning: FirstPerson held socket runtime check: pawn=X=3581.325 Y=141.258 Z=148.250 camera=X=3473.092 Y=67.149 Z=192.250 mesh=X=3372.868 Y=-1.476 Z=145.927 meshRot=P=-0.000000 Y=-55.599998 R=69.125000 meshDist=130.0 socket=X=3437.219 Y=55.907 Z=154.851 socketDist=53.0 skeletalMesh=women_shuangshou_mesh anim=ABP_first_women_C_0 actorRepMove=false
+LogTemp: Warning: Attach held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 to first-person mesh: component=FirstPersonMesh socket=RightSocket relativeLocation=X=2.000 Y=-9.000 Z=4.000 relativeRotation=P=-175.000000 Y=20.000000 R=-60.000000 worldLocation=X=3277.909 Y=-925.518 Z=301.224 hidden=false
 LogTemp: Warning: ʰ  : card_suo_C_UAID_74563CF626F2D8EC02_2015054727
-LogTemp: Warning: Held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 hidden by anti-wall trace. HitActor=StaticMeshActor_UAID_74563CF626F253EB02_1342998264 HitComponent=StaticMeshComponent0 PawnLoc=X=3592.267 Y=103.297 Z=148.250 HeldLoc=X=2958.735 Y=-719.993 Z=-191.080
-LogTemp: Warning: Held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 shown again: anti-wall trace is clear
+LogTemp: Warning: Held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 hidden. TooFar=true Distance=1017.2 HitActor=None HitComponent=None CameraLoc=X=3473.092 Y=67.149 Z=192.250 HeldLoc=X=3274.652 Y=-924.586 Z=301.224
 Cmd: DebugManager.CycleToPreviousColumn
-LogTemp: Warning: Held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 hidden by anti-wall trace. HitActor=StaticMeshActor_UAID_74563CF626F253EB02_1342998264 HitComponent=StaticMeshComponent0 PawnLoc=X=3616.602 Y=50.106 Z=148.250 HeldLoc=X=2783.631 Y=-391.030 Z=-42.730
-LogTemp: Warning: Held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 shown again: anti-wall trace is clear
-LogTemp: Warning: Held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 hidden by anti-wall trace. HitActor=StaticMeshActor_UAID_74563CF626F21AEB02_1932470260 HitComponent=StaticMeshComponent0 PawnLoc=X=3507.941 Y=-384.833 Z=148.250 HeldLoc=X=2862.211 Y=-1056.940 Z=402.623
-LogTemp: Warning: Held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 shown again: anti-wall trace is clear
-LogTemp: Warning: Held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 hidden by anti-wall trace. HitActor=StaticMeshActor_UAID_74563CF626F21AEB02_1932470260 HitComponent=StaticMeshComponent0 PawnLoc=X=3535.565 Y=-478.415 Z=148.250 HeldLoc=X=2967.470 Y=-1213.350 Z=420.343
-LogTemp: Warning: Held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 shown again: anti-wall trace is clear
-LogTemp: Warning: Held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 hidden by anti-wall trace. HitActor=StaticMeshActor_UAID_74563CF626F21AEB02_1923174259 HitComponent=StaticMeshComponent0 PawnLoc=X=3599.320 Y=-584.481 Z=148.250 HeldLoc=X=3031.225 Y=-1319.417 Z=420.343
-LogTemp: Warning: Held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 shown again: anti-wall trace is clear
-LogTemp: Warning: Held item card_suo_C_UAID_74563CF626F2D8EC02_2015054727 hidden by anti-wall trace. HitActor=StaticMeshActor_UAID_74563CF626F21AEB02_1923174259 HitComponent=StaticMeshComponent0 PawnLoc=X=3619.915 Y=-618.178 Z=148.250 HeldLoc=X=3054.008 Y=-1341.479 Z=430.317
 LogSlate: Updating window title bar state: overlay mode, drag disabled, window buttons hidden, title bar hidden
+LogWorld: BeginTearingDown for /Game/level/Level_Market/UEDPIE_0_Market_level
+LogCrowdFollowing: Warning: Unable to find RecastNavMesh instance while trying to create UCrowdManager instance
+LogWorld: UWorld::CleanupWorld for Market_level, bSessionEnded=true, bCleanupResources=true
+LogSlate: InvalidateAllWidgets triggered.  All widgets were invalidated
+LogWorldPartition: UWorldPartition::Uninitialize : World = /Game/level/Level_Market/UEDPIE_0_Market_level.Market_level
+LogPlayLevel: Display: Shutting down PIE online subsystems
