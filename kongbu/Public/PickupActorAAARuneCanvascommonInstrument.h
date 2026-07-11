@@ -218,6 +218,9 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Draw", meta = (ClampMin = "0.0001", ClampMax = "0.25"))
     float MinDrawPointDistanceUV = 0.004f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Draw", meta = (ClampMin = "0.01", ClampMax = "1.0"))
+    float MaxDrawSegmentDistanceUV = 0.18f;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Recognition")
     bool bEnableHiddenNodeRecognition = true;
 
@@ -329,6 +332,9 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Flight")
     FRotator FlatCardFlightRotationOffset = FRotator(0.f, 90.f, 0.f);
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Flight", meta = (ClampMin = "0.0"))
+    float FlatCardFlightRotationBlendDuration = 0.1f;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RuneCanvas|Flight|Curve")
     bool bEnableFlatCardFlightCurve = false;
 
@@ -433,6 +439,7 @@ private:
     FVector FlatCardFlightAxisRight = FVector::RightVector;
     FVector FlatCardFlightAxisUp = FVector::UpVector;
     FVector FlatCardFlightStartVisualCenter = FVector::ZeroVector;
+    FQuat FlatCardFlightStartRotation = FQuat::Identity;
     float FlatCardFlightElapsedTime = 0.f;
     float FlatCardFlightSpinAngle = 0.f;
     float FlatCardFlightSpeed = 0.f;

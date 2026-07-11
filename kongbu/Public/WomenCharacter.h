@@ -216,6 +216,12 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Reaction")
     void ClearForcedReactionState();
 
+    UFUNCTION(BlueprintCallable, Category = "Movement")
+    void SetExternalMoveSpeedMultiplier(float NewMultiplier);
+
+    UFUNCTION(BlueprintPure, Category = "Movement")
+    float GetExternalMoveSpeedMultiplier() const { return ExternalMoveSpeedMultiplier; }
+
     // ======================================================================
     // 移动状态
     // ======================================================================
@@ -235,6 +241,9 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Replicated, Category = "Movement")
     bool IsMiddleHandleTime = false;
 
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, ReplicatedUsing = OnRep_ExternalMoveSpeedMultiplier, Category = "Movement")
+    float ExternalMoveSpeedMultiplier = 1.f;
+
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Replicated, Category = "Reaction")
     bool bIsSoulSucked = false;
 
@@ -245,6 +254,10 @@ public:
     TObjectPtr<AGhostCharacter> CurrentSoulSuckingGhost = nullptr;
 
 protected:
+
+    UFUNCTION()
+    void OnRep_ExternalMoveSpeedMultiplier();
+
     UFUNCTION(NetMulticast, Reliable)
     void MulticastPlaySoulSuckReactionAnimation();
 

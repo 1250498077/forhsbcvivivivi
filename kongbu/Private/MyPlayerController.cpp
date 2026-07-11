@@ -1096,20 +1096,22 @@ void AMyPlayerController::Tick(float DeltaTime)
         if (ACharacter *Char = Cast<ACharacter>(GetPawn()))
         {
             UCharacterMovementComponent *MoveComp = Char->GetCharacterMovement();
-            float CurrentSpeed = MoveComp->MaxWalkSpeed;
             const AWomenCharacter *MyChar = Cast<AWomenCharacter>(Char);
             const bool bIsSquatting = MyChar && MyChar->IsSquat;
+            const float ExternalSpeedMultiplier = MyChar ? MyChar->GetExternalMoveSpeedMultiplier() : 1.f;
             // const bool bCanSprint = bWantsToSprint && (!MyChar || !MyChar->IsSquat);
             const bool bCanSprint = bWantsToSprint && CanSprintWithHeldActor() && MyChar && !MyChar->IsSquat;
+            const float CurrentSpeed = MoveComp->MaxWalkSpeed;
 
             if (bCanSprint)
             {
-                float NewSpeed = FMath::FInterpConstantTo(CurrentSpeed, RunSpeed, DeltaTime, SpeedUpRate);
+                const float TargetSpeed = RunSpeed * ExternalSpeedMultiplier;
+                float NewSpeed = FMath::FInterpConstantTo(CurrentSpeed, TargetSpeed, DeltaTime, SpeedUpRate);
                 MoveComp->MaxWalkSpeed = NewSpeed;
             }
             else
             {
-                const float TargetWalkSpeed = bIsSquatting ? CrouchSpeed : WalkSpeed;
+                const float TargetWalkSpeed = (bIsSquatting ? CrouchSpeed : WalkSpeed) * ExternalSpeedMultiplier;
                 float NewSpeed = FMath::FInterpConstantTo(CurrentSpeed, TargetWalkSpeed, DeltaTime, SpeedDownRate);
                 MoveComp->MaxWalkSpeed = NewSpeed;
             }
@@ -1384,7 +1386,9 @@ void AMyPlayerController::ThrowHeldActor()
 
         StartThrowAnimationState(MyChar);
 
-        const float LocalReleaseDelay = FMath::Max(0.f, ThrowReleaseDelay);
+        const float LocalReleaseDelay = HeldActor
+            ? HeldActor->ResolveThrowReleaseDelay(ThrowReleaseDelay)
+            : FMath::Max(0.f, ThrowReleaseDelay);
         const float LocalAnimationEndDelay = LocalReleaseDelay + FMath::Max(0.f, ThrowAnimationRecoveryDelay);
         const float LocalInputLockEndDelay = FMath::Max(LocalAnimationEndDelay, FMath::Max(0.f, ThrowInputLockDuration));
 
@@ -1472,7 +1476,9 @@ void AMyPlayerController::ThrowHeldActor()
     // 真正施加抛出冲量的时机交给定时器，以便和角色投掷动画同步。
     StartThrowAnimationState(MyChar);
 
-    const float ReleaseDelay = FMath::Max(0.f, ThrowReleaseDelay);
+    const float ReleaseDelay = ActorToThrow
+        ? ActorToThrow->ResolveThrowReleaseDelay(ThrowReleaseDelay)
+        : FMath::Max(0.f, ThrowReleaseDelay);
     const float AnimationEndDelay = ReleaseDelay + FMath::Max(0.f, ThrowAnimationRecoveryDelay);
     const float InputLockEndDelay = FMath::Max(AnimationEndDelay, FMath::Max(0.f, ThrowInputLockDuration));
 

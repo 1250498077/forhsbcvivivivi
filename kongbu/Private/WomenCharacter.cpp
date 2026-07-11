@@ -511,10 +511,19 @@ void AWomenCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
     DOREPLIFETIME(AWomenCharacter, IsSquatThrowing);
     DOREPLIFETIME(AWomenCharacter, IsStandThrowing);
     DOREPLIFETIME(AWomenCharacter, IsMiddleHandleTime);
+    DOREPLIFETIME(AWomenCharacter, ExternalMoveSpeedMultiplier);
     DOREPLIFETIME(AWomenCharacter, bIsSoulSucked);
     DOREPLIFETIME(AWomenCharacter, bIsKnockedDown);
 }
 
+void AWomenCharacter::SetExternalMoveSpeedMultiplier(float NewMultiplier)
+{
+    ExternalMoveSpeedMultiplier = FMath::Clamp(NewMultiplier, 0.05f, 1.f);
+}
+
+void AWomenCharacter::OnRep_ExternalMoveSpeedMultiplier()
+{
+}
 
 void AWomenCharacter::StartSoulSuckReaction(AGhostCharacter* SourceGhost)
 {

@@ -113,7 +113,7 @@ protected:
     // 从按下投掷到真正释放物体的延迟。
     // 应该与投掷动画里"出手"时机对齐。
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Throw", meta = (ClampMin = "0.0"))
-    float ThrowReleaseDelay = 0.35f;
+    float ThrowReleaseDelay = 0.25f;
 
     // 物体释放后，投掷动作还额外保持多久才结束。
     // 用来避免动画先收回，物体才飞出去。

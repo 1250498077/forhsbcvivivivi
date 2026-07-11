@@ -173,6 +173,14 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Pickup|Hold|Restrictions")
     bool bAllowThrowWhileHeld = true;
 
+    // 是否为这个道具单独覆盖“按下投掷后多久真正飞出”的时间。
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Pickup|Throw")
+    bool bOverrideThrowReleaseDelay = false;
+
+    // 单独覆盖的投掷飞出延迟。只在 bOverrideThrowReleaseDelay 开启时生效。
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Pickup|Throw", meta = (ClampMin = "0.0", EditCondition = "bOverrideThrowReleaseDelay"))
+    float ThrowReleaseDelayOverride = 0.35f;
+
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Pickup|Held Animation|First Person")
     FPickupHeldAnimationSet FirstPersonHeldAnimationSet;
 
@@ -286,6 +294,14 @@ public:
     bool AllowsThrowWhileHeld() const
     {
         return bAllowThrowWhileHeld;
+    }
+
+    UFUNCTION(BlueprintPure, Category = "Pickup|Throw")
+    float ResolveThrowReleaseDelay(float DefaultThrowReleaseDelay) const
+    {
+        return bOverrideThrowReleaseDelay
+            ? FMath::Max(0.f, ThrowReleaseDelayOverride)
+            : FMath::Max(0.f, DefaultThrowReleaseDelay);
     }
 
     UFUNCTION(BlueprintPure, Category = "Pickup|Ghost Interrupt")

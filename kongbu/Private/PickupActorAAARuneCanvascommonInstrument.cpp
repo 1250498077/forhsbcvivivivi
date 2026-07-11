@@ -819,6 +819,7 @@ void APickupActorAAARuneCanvascommonInstrument::StartFlatCardFlight(const FVecto
         FlatCardFlightAxisUp = FVector::UpVector;
     }
 
+    FlatCardFlightStartRotation = MeshComponent->GetComponentQuat();
     FlatCardFlightStartVisualCenter = GetFlatCardVisualCenterWorldLocation();
     FlatCardFlightElapsedTime = 0.f;
     FlatCardFlightSpinAngle = 0.f;
@@ -867,7 +868,21 @@ void APickupActorAAARuneCanvascommonInstrument::UpdateFlatCardFlight(float Delta
     FlatCardFlightSpinAngle = FMath::Fmod(
         FlatCardFlightSpinAngle + FMath::Max(0.f, FlatCardFlightSpinRateDegrees) * DeltaTime,
         360.f);
-    ApplyFlatCardFlightRotationPreservingVisualCenter(BuildFlatCardFlightRotation());
+    
+
+    const FQuat DesiredFlightRotation = BuildFlatCardFlightRotation().Quaternion();
+    const float RotationBlendDuration = FMath::Max(0.f, FlatCardFlightRotationBlendDuration);
+    if (RotationBlendDuration > UE_KINDA_SMALL_NUMBER && FlatCardFlightElapsedTime < RotationBlendDuration)
+    {
+        const float RotationBlendAlpha = FMath::Clamp(FlatCardFlightElapsedTime / RotationBlendDuration, 0.f, 1.f);
+        const float SmoothRotationBlendAlpha = RotationBlendAlpha * RotationBlendAlpha * (3.f - 2.f * RotationBlendAlpha);
+        const FQuat BlendedRotation = FQuat::Slerp(FlatCardFlightStartRotation, DesiredFlightRotation, SmoothRotationBlendAlpha).GetNormalized();
+        ApplyFlatCardFlightRotationPreservingVisualCenter(BlendedRotation.Rotator());
+    }
+    else
+    {
+        ApplyFlatCardFlightRotationPreservingVisualCenter(DesiredFlightRotation.Rotator());
+    }
 }
 
 void APickupActorAAARuneCanvascommonInstrument::UpdateFlatCardFlightCurve(float DeltaTime)
@@ -948,6 +963,7 @@ void APickupActorAAARuneCanvascommonInstrument::StopFlatCardFlight(bool bRestore
     FlatCardFlightAxisDistance = 0.f;
     FlatCardFlightHelixAngle = 0.f;
     FlatCardFlightHelixAlpha = 0.f;
+    FlatCardFlightStartRotation = FQuat::Identity;
 
     if (bRestoreGravity && MeshComponent && MeshComponent->IsSimulatingPhysics())
     {
@@ -1821,6 +1837,15 @@ void APickupActorAAARuneCanvascommonInstrument::AddDrawPoint(const FVector2D &UV
         {
             return;
         }
+
+        if (FVector2D::DistSquared(PreviousUV, UV) > FMath::Square(MaxDrawSegmentDistanceUV))
+        {
+            bCanConnectNextDrawPoint = false;
+            DrawnUVPoints.Add(UV);
+            ReceiveRuneCanvasDrawStateChanged(DrawnUVPoints, bRuneDrawActive);
+            return;
+        }
+        
         DrawStrokeSegment(PreviousUV, UV);
     }
     DrawnUVPoints.Add(UV);
